@@ -1,11 +1,15 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 import { X, Send, AlertCircle } from 'lucide-react';
+
 
 const rawApiUrl = import.meta.env.VITE_API_URL || 'https://crisis-misinformation-detector.onrender.com/api';
 const API_BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl.replace(/\/$/, '')}/api`;
 
 const ReportForm = ({ onClose, user, location, onDetectLocation, onSuccess }) => {
+
+  const { t } = useTranslation();
   const [type, setType] = useState('accident');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,19 +28,46 @@ const ReportForm = ({ onClose, user, location, onDetectLocation, onSuccess }) =>
 
     setLoading(true);
     setError('');
-
     try {
-      await axios.post(`${API_BASE_URL}/reports`, {
+
+      const reportData = {
         userId: user._id,
         type,
         description,
         longitude: location.lng,
         latitude: location.lat,
-      });
-      onSuccess();
-      onClose();
+      };
+
+      if (navigator.onLine) {
+
+        await axios.post(`${API_BASE_URL}/reports`, reportData);
+
+        onSuccess();
+        onClose();
+
+      } else {
+
+        const offlineReports =
+          JSON.parse(localStorage.getItem("offlineReports")) || [];
+
+        offlineReports.push(reportData);
+
+        localStorage.setItem(
+          "offlineReports",
+          JSON.stringify(offlineReports)
+        );
+
+        console.log(
+          JSON.parse(localStorage.getItem("offlineReports"))
+        );
+
+        alert("No internet. Report saved locally and will sync automatically.");
+
+        onClose();
+      }
+
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to submit report. Try again.');
+      setError(err.response?.data?.error || "Failed to submit report. Try again.");
     } finally {
       setLoading(false);
     }
@@ -48,7 +79,7 @@ const ReportForm = ({ onClose, user, location, onDetectLocation, onSuccess }) =>
     <div className="slide-panel">
       <div className="slide-panel-header">
         <div>
-          <h2>Report Emergency</h2>
+          <h2>{t("reportEmergency")}</h2>
           <p>Provide accurate details for verification</p>
         </div>
         <button className="close-btn" onClick={onClose}>
@@ -65,7 +96,7 @@ const ReportForm = ({ onClose, user, location, onDetectLocation, onSuccess }) =>
         )}
 
         <div>
-          <label className="form-label">Crisis Type</label>
+          <label className="form-label">{t("crisisType")}</label>
           <div className="type-grid">
             {crisisTypes.map((t) => (
               <button
@@ -81,7 +112,7 @@ const ReportForm = ({ onClose, user, location, onDetectLocation, onSuccess }) =>
         </div>
 
         <div>
-          <label className="form-label">Description</label>
+          <label className="form-label">{t("description")}</label>
           <textarea
             required
             value={description}
@@ -102,14 +133,14 @@ const ReportForm = ({ onClose, user, location, onDetectLocation, onSuccess }) =>
                 {location ? `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}` : 'Click on the map to set location'}
               </p>
             </div>
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={onDetectLocation}
-              className="btn btn-ghost" 
+              className="btn btn-ghost"
               style={{ padding: '8px', fontSize: '11px', height: 'auto' }}
               title="Use my current location"
             >
-              Detect Location
+              {t("detectLocation")}
             </button>
           </div>
           <p style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic', margin: 0 }}>
@@ -118,7 +149,7 @@ const ReportForm = ({ onClose, user, location, onDetectLocation, onSuccess }) =>
         </div>
 
         <button disabled={loading} type="submit" className="btn btn-primary" style={{ width: '100%', height: '52px', justifyContent: 'center', fontSize: '16px', marginTop: 'auto' }}>
-          {loading ? 'Submitting...' : 'Submit Report'}
+          {loading ? t("submitting") : t("submitReport")}
         </button>
       </form>
     </div>

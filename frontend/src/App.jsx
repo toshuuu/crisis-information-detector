@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-import { MapPin, AlertTriangle, ShieldCheck, Trophy, Bell, LogOut } from 'lucide-react';
+import { MapPin, AlertTriangle, ShieldCheck, Trophy, Bell, LogOut, Loader2 } from 'lucide-react';
 import MapComponent from './components/Map';
 import ReportList from './components/ReportList';
 import ReportForm from './components/ReportForm';
@@ -10,21 +10,29 @@ import VerificationPanel from './components/VerificationPanel';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import api from './services/api';
+import { syncOfflineReports } from './services/offlineSync';
+
+
 
 const rawApiUrl = import.meta.env.VITE_API_URL || 'https://crisis-misinformation-detector.onrender.com/api';
 const API_BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl.replace(/\/$/, '')}/api`;
 const socket = io(import.meta.env.VITE_SOCKET_URL || 'https://crisis-misinformation-detector.onrender.com');
 
 function App() {
+
   const [isLoginView, setIsLoginView] = useState(true);
   const [user, setUser] = useState(null);
   const [location, setLocation] = useState(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locationError, setLocationError] = useState(null);
+  const [shouldRecenter, setShouldRecenter] = useState(false);
   const [reports, setReports] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
   const [showReportForm, setShowReportForm] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [crisisLocation, setCrisisLocation] = useState(null);
+
 
   // Initialize User
   useEffect(() => {
@@ -43,22 +51,80 @@ function App() {
     initUser();
   }, []);
 
-  // Track Location
+  // Handler to locate user via browser geolocation API
+  const handleLocateUser = useCallback(() => {
+    if (!("geolocation" in navigator)) {
+      const errMsg = "Geolocation is not supported by your browser.";
+      setLocationError(errMsg);
+      setNotifications((prev) => [{ id: Date.now(), message: errMsg }, ...prev]);
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const newCoords = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        };
+        setLocation(newCoords);
+        setShouldRecenter(true);
+        setIsLocating(false);
+        setLocationError(null);
+
+        if (user) {
+          socket.emit('join_location', {
+            lat: newCoords.lat,
+            lng: newCoords.lng,
+            userId: user._id,
+          });
+        }
+      },
+      (err) => {
+        setIsLocating(false);
+        let errMsg = "Unable to retrieve your current location.";
+        if (err.code === 1) { // PERMISSION_DENIED
+          errMsg = "Location permission denied. Please allow location access in your browser settings (look for the lock or site settings icon in your address bar) and try again.";
+        } else if (err.code === 2) { // POSITION_UNAVAILABLE
+          errMsg = "Location information is unavailable. Please check your network or device GPS connection.";
+        } else if (err.code === 3) { // TIMEOUT
+          errMsg = "Location request timed out. Please click 'Locate Me' again.";
+        }
+        setLocationError(errMsg);
+        setNotifications((prev) => [{ id: Date.now(), message: errMsg }, ...prev]);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  }, [user]);
+
+  // Keep location updated in background once location is granted
   useEffect(() => {
-    if ("geolocation" in navigator) {
+    if ("geolocation" in navigator && location) {
       const watchId = navigator.geolocation.watchPosition(
         (pos) => {
-          setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          setLocation((prev) => ({
+            ...(prev || {}),
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+          }));
           if (user) {
             socket.emit('join_location', { lat: pos.coords.latitude, lng: pos.coords.longitude, userId: user._id });
           }
         },
-        (err) => console.error("Geolocation error:", err),
-        { enableHighAccuracy: true }
+        (err) => console.warn("Geolocation watch warning:", err),
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
       );
       return () => navigator.geolocation.clearWatch(watchId);
     }
-  }, [user]);
+  }, [user, !!location]);
 
   // Fetch Reports
   const fetchReports = useCallback(async () => {
@@ -73,6 +139,23 @@ function App() {
   useEffect(() => {
     // eslint-disable-next-line
     fetchReports();
+  }, [fetchReports]);
+
+  // Sync offline reports when internet comes back
+  useEffect(() => {
+    const handleOnline = async () => {
+      console.log("Internet connection restored.");
+
+      await syncOfflineReports();
+
+      fetchReports();
+    };
+
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+    };
   }, [fetchReports]);
 
   const handleDeleteReport = async (reportId) => {
@@ -159,6 +242,7 @@ function App() {
             <div className="user-name">{user?.name || 'Guest'}</div>
             <div className="user-stats">{user?.points || 0} Points • Trust: {trustDisplay}</div>
           </div>
+
           <button className="icon-btn" onClick={() => {
             localStorage.removeItem('token');
             setUser(null);
@@ -179,6 +263,20 @@ function App() {
       <main className="main-content">
         {/* Map */}
         <div className="map-container">
+          {locationError && (
+            <div className="location-error-alert">
+              <AlertTriangle size={18} />
+              <span>{locationError}</span>
+              <button
+                type="button"
+                className="close-error-btn"
+                onClick={() => setLocationError(null)}
+                aria-label="Dismiss error"
+              >
+                &times;
+              </button>
+            </div>
+          )}
           <MapComponent
             center={location || { lat: 18.5204, lng: 73.8567 }}
             reports={reports}
@@ -186,8 +284,21 @@ function App() {
             onMarkerClick={handleReportClick}
             onMapClick={(loc) => showReportForm && setCrisisLocation(loc)}
             selectedCrisisLocation={crisisLocation}
+            shouldRecenter={shouldRecenter}
+            onRecenterComplete={() => setShouldRecenter(false)}
           />
           <div className="map-overlay-buttons">
+            <button
+              type="button"
+              className="btn btn-secondary btn-locate"
+              onClick={handleLocateUser}
+              disabled={isLocating}
+              title="Locate Me"
+              aria-label="Locate Me"
+            >
+              {isLocating ? <Loader2 size={18} className="spin-icon" /> : <MapPin size={18} />}
+              <span>{isLocating ? "Locating..." : "Locate Me"}</span>
+            </button>
             <button className="btn btn-primary btn-report" onClick={() => {
               setShowReportForm(true);
               setCrisisLocation(location); // Default to current location
@@ -236,7 +347,13 @@ function App() {
             user={user}
             location={crisisLocation}
             userLocation={location}
-            onDetectLocation={() => setCrisisLocation(location)}
+            onDetectLocation={() => {
+              if (location) {
+                setCrisisLocation(location);
+              } else {
+                handleLocateUser();
+              }
+            }}
             onSuccess={fetchReports}
           />
         )}

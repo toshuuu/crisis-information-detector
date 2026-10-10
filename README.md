@@ -1,2 +1,2 @@
 # Crisis-Misinformation-Detector
-Internship project
+PBL project

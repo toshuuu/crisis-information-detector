@@ -8,6 +8,11 @@ const Login = ({ onLogin, onSwitchToSignup }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!navigator.onLine) {
+      setError("No internet connection. Please connect to the internet to log in.");
+      return;
+    }
     try {
       const res = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', res.data.token);
@@ -22,28 +27,28 @@ const Login = ({ onLogin, onSwitchToSignup }) => {
       <form onSubmit={handleSubmit} className="auth-form">
         <h2>Login to Ground Truth</h2>
         {error && <div className="error-banner"><span>{error}</span></div>}
-        
+
         <div className="form-group">
           <label className="form-label">Email</label>
-          <input 
-            type="email" 
+          <input
+            type="email"
             className="form-input"
-            placeholder="Enter your email" 
-            value={email} 
-            onChange={(e) => setEmail(e.target.value)} 
-            required 
+            placeholder="Enter your email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
           />
         </div>
 
         <div className="form-group">
           <label className="form-label">Password</label>
-          <input 
-            type="password" 
+          <input
+            type="password"
             className="form-input"
-            placeholder="Enter your password" 
-            value={password} 
-            onChange={(e) => setPassword(e.target.value)} 
-            required 
+            placeholder="Enter your password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
           />
         </div>
 
