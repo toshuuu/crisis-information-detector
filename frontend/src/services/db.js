@@ -360,3 +360,150 @@ export const getAllSyncMetadata = async () => {
   }
   return map;
 };
+
+// ==========================================
+// 8. OFFLINE AUTHENTICATION & PROFILES
+// ==========================================
+
+const KNOWN_USERS_KEY = 'offline_known_users';
+const LAST_ACTIVE_USER_KEY = 'last_active_user';
+
+/**
+ * Compute SHA-256 hash of email + password for secure client-side offline verification.
+ * Raw passwords are NEVER stored in IndexedDB.
+ */
+export const hashCredential = async (email, password) => {
+  const normalized = `${(email || '').trim().toLowerCase()}:${password || ''}`;
+  if (typeof window !== 'undefined' && window.crypto?.subtle) {
+    const msgBuffer = new TextEncoder().encode(normalized);
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  // Simple deterministic fallback hash if Web Crypto is unavailable
+  let hash = 0;
+  for (let i = 0; i < normalized.length; i++) {
+    hash = ((hash << 5) - hash) + normalized.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16);
+};
+
+/**
+ * Cache user profile upon successful login/signup for offline authentication.
+ */
+export const saveOfflineUserProfile = async (user, token, password = null) => {
+  if (!user || !user._id) return null;
+
+  const currentUsers = (await getUserPreference(KNOWN_USERS_KEY, [])) || [];
+  let credentialHash = null;
+
+  if (password) {
+    credentialHash = await hashCredential(user.email, password);
+  } else {
+    // Preserve existing hash if password was omitted
+    const existing = currentUsers.find((u) => u._id === user._id || u.email?.toLowerCase() === user.email?.toLowerCase());
+    credentialHash = existing?.credentialHash || null;
+  }
+
+  const profileRecord = {
+    _id: user._id,
+    name: user.name || 'Responder',
+    email: (user.email || '').toLowerCase(),
+    points: user.points || 0,
+    trustScore: user.trustScore || 0,
+    badges: user.badges || [],
+    token: token || localStorage.getItem('token'),
+    credentialHash,
+    lastLoginAt: Date.now(),
+  };
+
+  const updatedUsers = [
+    profileRecord,
+    ...currentUsers.filter((u) => u._id !== profileRecord._id && u.email?.toLowerCase() !== profileRecord.email),
+  ];
+
+  await setUserPreference(KNOWN_USERS_KEY, updatedUsers);
+  await setUserPreference(LAST_ACTIVE_USER_KEY, profileRecord);
+  return profileRecord;
+};
+
+/**
+ * Get all cached user profiles on this device
+ */
+export const getOfflineUsersList = async () => {
+  return (await getUserPreference(KNOWN_USERS_KEY, [])) || [];
+};
+
+/**
+ * Get the last active user profile on this device
+ */
+export const getLastActiveUser = async () => {
+  return await getUserPreference(LAST_ACTIVE_USER_KEY, null);
+};
+
+/**
+ * Validate offline login against locally cached credentials
+ */
+export const verifyOfflineLogin = async (email, password) => {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const users = await getOfflineUsersList();
+  const targetUser = users.find((u) => u.email?.toLowerCase() === cleanEmail);
+
+  if (!targetUser) {
+    return {
+      success: false,
+      error: 'No cached profile found for this email on this device. Please connect online first or use Emergency Offline Access.',
+    };
+  }
+
+  if (targetUser.credentialHash) {
+    const inputHash = await hashCredential(cleanEmail, password);
+    if (inputHash !== targetUser.credentialHash) {
+      return {
+        success: false,
+        error: 'Incorrect offline password for this cached profile.',
+      };
+    }
+  }
+
+  // Restore cached auth token if available
+  if (targetUser.token) {
+    localStorage.setItem('token', targetUser.token);
+  }
+
+  // Update last active user
+  await setUserPreference(LAST_ACTIVE_USER_KEY, { ...targetUser, lastLoginAt: Date.now() });
+
+  return {
+    success: true,
+    user: targetUser,
+  };
+};
+
+/**
+ * Create an emergency offline responder session when no account exists
+ */
+export const createEmergencyOfflineUser = async (name = 'Emergency Responder', email = '') => {
+  const cleanName = (name || '').trim() || 'Emergency Responder';
+  const cleanEmail = (email || '').trim().toLowerCase() || `offline_${Date.now()}@emergency.local`;
+  const offlineId = `offline_usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+  const emergencyUser = {
+    _id: offlineId,
+    name: cleanName,
+    email: cleanEmail,
+    points: 0,
+    trustScore: 0,
+    badges: ['Offline Responder'],
+    isOfflineGuest: true,
+    lastLoginAt: Date.now(),
+  };
+
+  await setUserPreference(LAST_ACTIVE_USER_KEY, emergencyUser);
+
+  const currentUsers = (await getUserPreference(KNOWN_USERS_KEY, [])) || [];
+  await setUserPreference(KNOWN_USERS_KEY, [emergencyUser, ...currentUsers]);
+
+  return emergencyUser;
+};

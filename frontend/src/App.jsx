@@ -15,7 +15,9 @@ import {
   HeartPulse,
   Download,
   CheckCircle2,
-  Info
+  Info,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 import MapComponent from './components/Map';
 import ReportList from './components/ReportList';
@@ -32,7 +34,9 @@ import {
   saveReportsToDB,
   getPendingReportsFromDB,
   deleteCachedReportFromDB,
-  clearUserNotificationsFromDB
+  clearUserNotificationsFromDB,
+  getLastActiveUser,
+  saveOfflineUserProfile
 } from './services/db';
 import {
   initConnectivitySync,
@@ -77,6 +81,7 @@ function App() {
   const [showReportForm, setShowReportForm] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [crisisLocation, setCrisisLocation] = useState(null);
 
   // Notifications State
@@ -180,18 +185,34 @@ function App() {
     };
   }, [user?._id]);
 
-  // Initialize User session
+  // Initialize User session (supports online verification & offline profile recovery)
   useEffect(() => {
     const initUser = async () => {
       const token = localStorage.getItem('token');
       if (token) {
-        try {
-          const res = await api.get('/auth/me');
-          setUser(res.data);
-        } catch (err) {
-          console.error('Auth check failed:', err);
-          if (err.response?.status === 401) {
-            localStorage.removeItem('token');
+        if (navigator.onLine) {
+          try {
+            const res = await api.get('/auth/me', { timeout: 4000 });
+            setUser(res.data);
+            await saveOfflineUserProfile(res.data, token);
+          } catch (err) {
+            console.warn('Auth online check warning:', err.message);
+            if (err.response?.status === 401) {
+              localStorage.removeItem('token');
+              setUser(null);
+            } else {
+              // Network timeout/unreachable: recover cached offline profile
+              const cachedUser = await getLastActiveUser();
+              if (cachedUser) {
+                setUser(cachedUser);
+              }
+            }
+          }
+        } else {
+          // Offline mode: restore cached user profile from IndexedDB
+          const cachedUser = await getLastActiveUser();
+          if (cachedUser) {
+            setUser(cachedUser);
           }
         }
       }
@@ -673,34 +694,55 @@ function App() {
             shouldRecenter={shouldRecenter}
             onRecenterComplete={() => setShouldRecenter(false)}
             isOffline={isOffline}
+            onLocateUser={handleLocateUser}
+            isLocating={isLocating}
+            onOpenReportForm={() => {
+              setShowReportForm(true);
+              setCrisisLocation(location);
+            }}
           />
-          <div className="map-overlay-buttons">
-            <button
-              type="button"
-              className="btn btn-secondary btn-locate"
-              onClick={handleLocateUser}
-              disabled={isLocating}
-              title="Locate Me"
-              aria-label="Locate Me"
-            >
-              {isLocating ? <Loader2 size={18} className="spin-icon" /> : <MapPin size={18} />}
-              <span>{isLocating ? 'Locating...' : 'Locate Me'}</span>
-            </button>
-            <button
-              className="btn btn-primary btn-report"
-              onClick={() => {
-                setShowReportForm(true);
-                setCrisisLocation(location);
-              }}
-            >
-              <AlertTriangle size={22} />
-              Report Crisis
-            </button>
-          </div>
         </div>
 
-        {/* Side Panel */}
-        <aside className="sidebar">
+        {/* Backdrop for mobile drawer */}
+        {isMobileDrawerOpen && (
+          <div
+            className="mobile-drawer-backdrop"
+            onClick={() => setIsMobileDrawerOpen(false)}
+          />
+        )}
+
+        {/* Side Panel / Collapsible Mobile Bottom Sheet */}
+        <aside className={`sidebar ${isMobileDrawerOpen ? 'mobile-drawer-open' : 'mobile-drawer-collapsed'}`}>
+          {/* Mobile Peek Handle Bar */}
+          <div
+            className="mobile-drawer-peek-bar"
+            onClick={() => setIsMobileDrawerOpen(!isMobileDrawerOpen)}
+          >
+            <div className="drawer-handle-pill" />
+            <div className="drawer-peek-row">
+              <div className="drawer-peek-info">
+                <MapPin size={15} color="#DC2626" />
+                <span className="drawer-peek-count">{reports.length} Incidents</span>
+                {syncState.pendingCount > 0 && (
+                  <span className="pending-sidebar-pill">
+                    {syncState.pendingCount} pending
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="drawer-peek-toggle-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMobileDrawerOpen(!isMobileDrawerOpen);
+                }}
+              >
+                <span>{isMobileDrawerOpen ? 'View Map' : 'View List'}</span>
+                {isMobileDrawerOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+              </button>
+            </div>
+          </div>
+
           <div className="sidebar-header">
             <h2>
               <MapPin size={18} color="var(--primary)" />
@@ -715,7 +757,10 @@ function App() {
           <div className="sidebar-body">
             <ReportList
               reports={reports}
-              onReportClick={handleReportClick}
+              onReportClick={(rep) => {
+                handleReportClick(rep);
+                setIsMobileDrawerOpen(false);
+              }}
               selectedId={selectedReport?._id || selectedReport?.clientReportId}
               onDelete={handleDeleteReport}
             />

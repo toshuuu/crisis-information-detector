@@ -2,32 +2,32 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, Loader2, WifiOff, DownloadCloud } from 'lucide-react';
+import { MapPin, Loader2, WifiOff, DownloadCloud, AlertTriangle } from 'lucide-react';
 import OfflineMapManager from './OfflineMapManager';
 
 const STATUS_COLORS = {
-  active: '#EA4335',      // Red
-  verified: '#34A853',    // Green
-  uncertain: '#FBBC05',   // Yellow
-  false: '#9AA0A6',       // Grey
-  pending: '#F59E0B',     // Amber for offline pending
+  active: '#DC2626',      // Emergency Red
+  verified: '#16A34A',    // Green
+  uncertain: '#F59E0B',   // Amber
+  false: '#64748B',       // Slate Grey
+  pending: '#DC2626',     // Red for offline pending
 };
 
 // Custom SVG icon generator for Crisis Reports
 const createCustomIcon = (color, isSelected = false, isPending = false) => {
-  const size = isSelected ? 40 : 32;
+  const size = isSelected ? 38 : 30;
   const anchorX = size / 2;
   const anchorY = size;
   const filter = isSelected
-    ? `drop-shadow(0px 0px 8px ${color}) drop-shadow(0 4px 8px rgba(0,0,0,0.35))`
-    : 'drop-shadow(0 2px 4px rgba(0,0,0,0.25))';
+    ? `drop-shadow(0px 0px 8px ${color}) drop-shadow(0 4px 8px rgba(0,0,0,0.25))`
+    : 'drop-shadow(0 2px 4px rgba(0,0,0,0.18))';
 
   const pulseRing = isSelected
-    ? `<span style="position: absolute; width: ${size + 14}px; height: ${size + 14}px; border-radius: 50%; border: 3px solid ${color}; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; top: -7px; left: -7px; pointer-events: none;"></span>`
+    ? `<span style="position: absolute; width: ${size + 12}px; height: ${size + 12}px; border-radius: 50%; border: 2.5px solid ${color}; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; top: -6px; left: -6px; pointer-events: none;"></span>`
     : '';
 
   const pendingBadge = isPending
-    ? `<span style="position: absolute; top: -4px; right: -4px; background: #DC2626; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #FFFFFF;"></span>`
+    ? `<span style="position: absolute; top: -3px; right: -3px; background: #DC2626; width: 10px; height: 10px; border-radius: 50%; border: 2px solid #FFFFFF;"></span>`
     : '';
 
   const svg = `
@@ -51,31 +51,31 @@ const createCustomIcon = (color, isSelected = false, isPending = false) => {
 const userLocationIcon = L.divIcon({
   className: 'user-location-marker',
   html: `
-    <div style="position: relative; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
-      <span style="position: absolute; width: 22px; height: 22px; border-radius: 50%; background-color: rgba(59, 130, 246, 0.4); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
-      <svg width="20" height="20" viewBox="0 0 20 20">
-        <circle cx="10" cy="10" r="8" fill="#3B82F6" stroke="white" stroke-width="3" />
+    <div style="position: relative; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;">
+      <span style="position: absolute; width: 20px; height: 20px; border-radius: 50%; background-color: rgba(220, 38, 38, 0.3); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+      <svg width="18" height="18" viewBox="0 0 20 20">
+        <circle cx="10" cy="10" r="7.5" fill="#DC2626" stroke="white" stroke-width="2.5" />
       </svg>
     </div>
   `,
-  iconSize: [22, 22],
-  iconAnchor: [11, 11],
-  popupAnchor: [0, -11],
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+  popupAnchor: [0, -10],
 });
 
 // Selected Crisis Location Marker (Pulsing Pinpoint Pin)
 const selectedLocationIcon = L.divIcon({
   className: 'selected-location-marker',
   html: `
-    <div style="position: relative; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
-      <span style="position: absolute; width: 36px; height: 36px; border-radius: 50%; background-color: rgba(16, 185, 129, 0.4); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="#10B981" style="filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35));">
+    <div style="position: relative; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;">
+      <span style="position: absolute; width: 34px; height: 34px; border-radius: 50%; background-color: rgba(220, 38, 38, 0.3); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="#DC2626" style="filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));">
         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="white" stroke-width="1.5"/>
       </svg>
     </div>
   `,
-  iconSize: [36, 36],
-  iconAnchor: [18, 34],
+  iconSize: [34, 34],
+  iconAnchor: [17, 32],
 });
 
 // Controller to fly to user location or selected crisis
@@ -85,7 +85,7 @@ const MapController = ({ center, userLocation, selectedReport, shouldRecenter, o
 
   useEffect(() => {
     if (shouldRecenter && userLocation) {
-      map.flyTo([userLocation.lat, userLocation.lng], 15, { animate: true, duration: 1.2 });
+      map.flyTo([userLocation.lat, userLocation.lng], 15, { animate: true, duration: 1.0 });
       if (onRecenterComplete) onRecenterComplete();
     }
   }, [shouldRecenter, userLocation, map, onRecenterComplete]);
@@ -100,7 +100,7 @@ const MapController = ({ center, userLocation, selectedReport, shouldRecenter, o
   useEffect(() => {
     if (selectedReport && selectedReport.location?.coordinates) {
       const [lng, lat] = selectedReport.location.coordinates;
-      map.flyTo([lat, lng], 15, { animate: true, duration: 1.0 });
+      map.flyTo([lat, lng], 15, { animate: true, duration: 0.9 });
     }
   }, [selectedReport, map]);
 
@@ -142,6 +142,9 @@ const MapComponent = ({
   shouldRecenter,
   onRecenterComplete,
   isOffline = false,
+  onLocateUser,
+  isLocating = false,
+  onOpenReportForm,
 }) => {
   const [currentMapCenter, setCurrentMapCenter] = useState(center || { lat: 18.5204, lng: 73.8567 });
   const [showMapManager, setShowMapManager] = useState(false);
@@ -153,21 +156,52 @@ const MapComponent = ({
       {isOffline && (
         <div className="offline-map-badge" title="Map is operating in offline mode. Previously cached tiles are being served.">
           <WifiOff size={13} />
-          <span>Offline Map Mode — Serving Cached Tiles</span>
+          <span>Offline Map Mode — Cached Tiles</span>
         </div>
       )}
 
-      {/* Button to open Offline Map Manager */}
-      <button
-        type="button"
-        className="btn-offline-map-manager"
-        onClick={() => setShowMapManager(true)}
-        title="Offline Map Areas & Caching"
-        aria-label="Offline Map Manager"
-      >
-        <DownloadCloud size={16} />
-        <span>Offline Maps</span>
-      </button>
+      {/* Vertical Map Action Rail (Organized vertically, no collisions) */}
+      <div className="map-floating-rail">
+        {onLocateUser && (
+          <button
+            type="button"
+            className="map-rail-btn btn-rail-locate btn-locate"
+            onClick={onLocateUser}
+            disabled={isLocating}
+            title="Locate My Position"
+            aria-label="Locate My Position"
+          >
+            {isLocating ? (
+              <Loader2 size={18} className="spin-icon" color="#DC2626" />
+            ) : (
+              <MapPin size={18} color="#DC2626" />
+            )}
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="map-rail-btn btn-rail-offline btn-offline-map-manager"
+          onClick={() => setShowMapManager(true)}
+          title="Offline Map Cache"
+          aria-label="Offline Map Manager"
+        >
+          <DownloadCloud size={18} color="#DC2626" />
+        </button>
+      </div>
+
+      {/* Floating Report Button */}
+      {onOpenReportForm && (
+        <button
+          type="button"
+          className="btn btn-primary btn-report btn-floating-report"
+          onClick={onOpenReportForm}
+          title="Report Emergency Incident"
+        >
+          <AlertTriangle size={18} />
+          <span>Report Crisis</span>
+        </button>
+      )}
 
       <MapContainer
         center={[center.lat, center.lng]}
@@ -199,8 +233,8 @@ const MapComponent = ({
             <Marker position={[userLocation.lat, userLocation.lng]} icon={userLocationIcon}>
               <Popup>
                 <div style={{ textAlign: 'center', padding: '4px' }}>
-                  <strong>Your Current Location</strong>
-                  <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
+                  <strong style={{ color: '#DC2626' }}>Your Current Location</strong>
+                  <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
                     Accuracy: ±{Math.round(userLocation.accuracy || 0)}m
                   </div>
                 </div>
@@ -211,11 +245,11 @@ const MapComponent = ({
                 center={[userLocation.lat, userLocation.lng]}
                 radius={Math.min(userLocation.accuracy, 500)}
                 pathOptions={{
-                  fillColor: '#3B82F6',
-                  fillOpacity: 0.12,
-                  color: '#3B82F6',
+                  fillColor: '#DC2626',
+                  fillOpacity: 0.08,
+                  color: '#DC2626',
                   opacity: 0.35,
-                  weight: 1,
+                  weight: 1.5,
                 }}
               />
             )}
@@ -230,8 +264,8 @@ const MapComponent = ({
           >
             <Popup>
               <div style={{ textAlign: 'center', padding: '4px' }}>
-                <strong style={{ color: '#10B981' }}>Selected Incident Location</strong>
-                <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
+                <strong style={{ color: '#DC2626' }}>Selected Incident Location</strong>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
                   {selectedCrisisLocation.lat.toFixed(4)}, {selectedCrisisLocation.lng.toFixed(4)}
                 </div>
               </div>

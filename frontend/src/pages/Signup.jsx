@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import api from '../services/api';
+import { saveOfflineUserProfile } from '../services/db';
 
 const Signup = ({ onLogin, onSwitchToLogin }) => {
   const [name, setName] = useState('');
@@ -12,6 +13,10 @@ const Signup = ({ onLogin, onSwitchToLogin }) => {
     try {
       const res = await api.post('/auth/signup', { name, email, password });
       localStorage.setItem('token', res.data.token);
+
+      // Cache profile for offline authentication
+      await saveOfflineUserProfile(res.data.user, res.data.token, password);
+
       onLogin(res.data.user);
     } catch (err) {
       setError(err.response?.data?.error || 'Signup failed');

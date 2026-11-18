@@ -198,6 +198,99 @@ body {
   z-index: 1000;
 }
 
+/* ===== FLOATING MAP CONTROLS (UNIFIED RAIL & FAB) ===== */
+.map-floating-rail {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.map-rail-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 1.5px solid #FEE2E2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #DC2626;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.map-rail-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  background: #FEF2F2;
+  border-color: #DC2626;
+  box-shadow: 0 6px 18px rgba(220, 38, 38, 0.22);
+}
+
+.map-rail-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.map-rail-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Specific resets for buttons inside the rail so other global selectors don't misplace them */
+.map-floating-rail .btn-offline-map-manager,
+.map-floating-rail .btn-locate {
+  position: static !important;
+  bottom: auto !important;
+  top: auto !important;
+  right: auto !important;
+  left: auto !important;
+}
+
+/* Floating Action Button (FAB) for Report Crisis */
+.btn-floating-report {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  z-index: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 22px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+  color: #FFFFFF;
+  font-size: 14px;
+  font-weight: 700;
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 6px 20px rgba(220, 38, 38, 0.35), 0 2px 8px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-floating-report:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(220, 38, 38, 0.45);
+}
+
+.btn-floating-report:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Mobile drawer peek bar and backdrop defaults (hidden on desktop) */
+.mobile-drawer-peek-bar {
+  display: none;
+}
+
+.mobile-drawer-backdrop {
+  display: none;
+}
+
 /* ===== BUTTONS ===== */
 .btn {
   padding: 12px 24px;
@@ -1444,14 +1537,15 @@ body {
 /* ===== MOBILE (< 768px) ===== */
 @media (max-width: 767px) {
 
-  /* Alert Banner */
+  /* Sleek, space-efficient emergency alert banner */
   .alert-banner {
-    padding: 5px 12px;
-    font-size: 9px;
-    letter-spacing: 0.5px;
+    padding: 4px 10px;
+    font-size: 10px;
+    letter-spacing: 0.4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-height: 22px;
   }
 
   .alert-banner-icon {
@@ -1462,24 +1556,47 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 700;
   }
 
-  /* Header */
+  /* Compact Sync Status Strip */
+  .sync-status-strip {
+    padding: 3px 10px;
+    font-size: 10.5px;
+  }
+
+  .status-strip-left {
+    gap: 6px;
+    font-size: 10px;
+  }
+
+  .connection-pill {
+    padding: 2px 7px;
+    font-size: 9.5px;
+  }
+
+  .btn-manual-sync {
+    padding: 2px 7px;
+    font-size: 10px;
+  }
+
+  /* Compact 48px Header giving plenty of breathing room */
   .app-header {
-    height: 56px;
-    padding: 0 12px;
+    height: 48px;
+    padding: 0 10px;
   }
 
   .header-brand {
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
     flex: 1;
   }
 
   .brand-icon {
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
     flex-shrink: 0;
+    border-radius: 8px;
   }
 
   .brand-text {
@@ -1488,10 +1605,12 @@ body {
   }
 
   .brand-text h1 {
-    font-size: 15px;
+    font-size: 13.5px;
+    font-weight: 800;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    letter-spacing: -0.2px;
   }
 
   .brand-text p {
@@ -1504,101 +1623,255 @@ body {
   }
 
   .user-info {
-    max-width: 90px;
-    min-width: 0;
-  }
-
-  .user-name {
-    font-size: 12px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 90px;
-  }
-
-  .user-stats {
-    display: none;
+    display: none; /* Hide user name pill on compact phone headers to save room */
   }
 
   .icon-btn {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 
-  /* Layout: stack map on top, sidebar on bottom */
+  .icon-btn svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .btn-emergency-action {
+    padding: 4px 8px;
+    font-size: 10.5px;
+    height: 30px;
+    gap: 4px;
+  }
+
+  /* Layout: Map is full canvas, sidebar is collapsible bottom drawer */
   .main-content {
-    flex-direction: column;
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 78px);
     overflow: hidden;
+    flex-direction: column;
   }
 
   .map-container {
-    flex: none;
-    height: 54vh;
-    min-height: 220px;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100% !important;
+    min-height: 0;
+    z-index: 1;
+  }
+
+  /* Map View Wrapper */
+  .map-view-wrapper {
+    width: 100%;
+    height: 100%;
     position: relative;
   }
 
-  /* Sidebar becomes full-width bottom panel */
-  .sidebar {
-    width: 100%;
-    flex-shrink: 0;
-    border-left: none;
-    border-top: 2px solid var(--border);
-    height: 46vh;
-    min-height: 200px;
-    overflow: hidden;
+  /* Map Floating Action Rail (Right Side - Locate & Offline Maps stacked neatly with ZERO collisions) */
+  .map-floating-rail {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 500;
     display: flex;
     flex-direction: column;
-    background: var(--bg-alt);
-    position: relative;
+    gap: 8px;
   }
 
-  /* Pull indicator handle */
-  .sidebar::before {
-    content: '';
+  .map-rail-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    border: 1.5px solid #FEE2E2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #DC2626;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(220, 38, 38, 0.1);
+  }
+
+  .map-rail-btn svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  /* Floating "Report Crisis" FAB - Perfectly positioned above collapsed drawer */
+  .btn-floating-report,
+  .btn-report {
+    position: absolute;
+    bottom: 58px;
+    right: 12px;
+    z-index: 500;
+    height: 42px;
+    padding: 0 16px;
+    font-size: 12.5px;
+    font-weight: 700;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+    color: #FFFFFF;
+    border: 1.5px solid #FFFFFF;
+    box-shadow: 0 4px 16px rgba(220, 38, 38, 0.38), 0 2px 6px rgba(0, 0, 0, 0.12);
+  }
+
+  .btn-floating-report svg,
+  .btn-report svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  /* Mobile Drawer Backdrop (dims the map when sheet is expanded) */
+  .mobile-drawer-backdrop {
     display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.38);
+    backdrop-filter: blur(2px);
+    z-index: 1040;
+    animation: fadeInBackdrop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes fadeInBackdrop {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Collapsible Bottom Sheet Drawer */
+  .sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100% !important;
+    background: #FFFFFF;
+    border-left: none;
+    border-top: 1.5px solid #FEE2E2;
+    z-index: 1050;
+    display: flex;
+    flex-direction: column;
+    transition: height 0.32s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+    overflow: hidden;
+  }
+
+  .sidebar::before {
+    display: none;
+  }
+
+  /* Collapsed state: neat 46px peek bar */
+  .sidebar.mobile-drawer-collapsed {
+    height: 46px !important;
+    min-height: 46px !important;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+  }
+
+  /* Expanded state: slides up smoothly to 72vh */
+  .sidebar.mobile-drawer-open {
+    height: 72vh !important;
+    max-height: 78vh !important;
+    border-radius: 22px 22px 0 0;
+    box-shadow: 0 -12px 42px rgba(220, 38, 38, 0.22);
+  }
+
+  /* Peek Bar styling */
+  .mobile-drawer-peek-bar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 5px 14px 6px;
+    background: #FFFFFF;
+    border-bottom: 1px solid #F1F5F9;
+    flex-shrink: 0;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .drawer-handle-pill {
     width: 36px;
     height: 4px;
-    background: var(--border);
-    border-radius: var(--radius-full);
-    margin: 8px auto 2px auto;
-    flex-shrink: 0;
+    background: #CBD5E1;
+    border-radius: 9999px;
+    margin-bottom: 5px;
+    transition: background 0.2s;
+  }
+
+  .mobile-drawer-peek-bar:hover .drawer-handle-pill {
+    background: #DC2626;
+  }
+
+  .drawer-peek-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .drawer-peek-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .drawer-peek-count {
+    font-size: 12.5px;
+    font-weight: 800;
+    color: #0F172A;
+  }
+
+  .drawer-peek-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    color: #DC2626;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
   }
 
   .sidebar-header {
-    padding: 8px 16px 10px;
+    padding: 8px 14px;
     flex-shrink: 0;
+    background: #FFFFFF;
+    border-bottom: 1px solid #F1F5F9;
   }
 
   .sidebar-header h2 {
-    font-size: 14px;
+    font-size: 13px;
+    color: #0F172A;
   }
 
   .sidebar-body {
     flex: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    padding: 8px 10px 16px;
+    background: #F8FAFC;
   }
 
-  /* Map overlay buttons */
-  .map-overlay-buttons {
-    bottom: 12px;
-    right: 12px;
-    gap: 8px;
+  /* Incident items inside list */
+  .report-item {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    margin-bottom: 8px;
+    min-height: auto;
   }
 
-  .btn-report {
-    height: 48px;
-    padding: 0 20px;
-    font-size: 14px;
-    border-radius: var(--radius-md);
-  }
-
-  .btn-locate {
-    height: 40px;
-    padding: 0 14px;
-    font-size: 13px;
-    border-radius: var(--radius-md);
+  .report-item:hover, .report-item.selected {
+    border-color: #DC2626;
+    background: #FEF2F2;
   }
 
   /* Location error alert */
@@ -1607,8 +1880,9 @@ body {
     left: 8px;
     right: 8px;
     font-size: 12px;
-    padding: 10px 12px;
+    padding: 8px 12px;
     gap: 8px;
+    z-index: 600;
   }
 
   /* Report Form - Dynamic Mobile Bottom Sheet (leaves map visible & interactive!) */
@@ -1947,41 +2221,9 @@ body {
     display: none;
   }
 
-  .btn-report {
-    height: 44px;
-    font-size: 13px;
-    padding: 0 16px;
-  }
-
-  .btn-locate {
-    padding: 0 10px;
-    font-size: 12px;
-  }
-
   .alert-banner {
-    font-size: 8px;
-    padding: 4px 8px;
-  }
-
-  .map-container {
-    height: 52vh;
-  }
-
-  .sidebar {
-    height: 48vh;
-  }
-}
-
-/* ===== LANDSCAPE MOBILE ===== */
-@media (max-width: 767px) and (orientation: landscape) {
-  .map-container {
-    height: 60vh;
-    min-height: 180px;
-  }
-
-  .sidebar {
-    height: 40vh;
-    min-height: 150px;
+    font-size: 8.5px;
+    padding: 3px 6px;
   }
 }
 
@@ -3805,12 +4047,14 @@ body {
     justify-content: center;
     text-align: center;
   }
-  .btn-offline-map-manager {
-    top: auto;
-    bottom: 84px;
-    right: 12px;
-    padding: 7px 12px;
-    font-size: 11px;
+  .map-rail-btn.btn-offline-map-manager,
+  .map-floating-rail .btn-offline-map-manager {
+    position: static !important;
+    top: auto !important;
+    bottom: auto !important;
+    right: auto !important;
+    left: auto !important;
+    padding: 0 !important;
   }
   .emergency-modal-card {
     max-height: 92vh;
@@ -3824,4 +4068,254 @@ body {
     position: fixed;
     bottom: 0;
   }
+}
+
+/* ===== ENHANCED AUTH & OFFLINE LOGIN STYLES (RED & WHITE) ===== */
+.auth-form-card {
+  background: #FFFFFF;
+  border: 1.5px solid #E2E8F0;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 16px 48px rgba(220, 38, 38, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04);
+  width: 100%;
+  max-width: 440px;
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-brand-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.auth-shield-badge {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: #DC2626;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3);
+  margin-bottom: 12px;
+}
+
+.auth-brand-header h2 {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0F172A;
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.auth-subtitle {
+  font-size: 12px;
+  color: #64748B;
+  margin-top: 4px;
+}
+
+.auth-mode-pill-row {
+  display: flex;
+  background: #F1F5F9;
+  border-radius: var(--radius-full);
+  padding: 3px;
+  margin-top: 14px;
+  border: 1px solid #E2E8F0;
+  width: 100%;
+}
+
+.mode-toggle-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: transparent;
+  color: #64748B;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-toggle-btn.active {
+  background: #DC2626;
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+}
+
+.offline-auth-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #FEF2F2;
+  border: 1.5px solid #FECACA;
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+
+.offline-auth-notice .notice-text strong {
+  display: block;
+  font-size: 12px;
+  color: #DC2626;
+  font-weight: 800;
+}
+
+.offline-auth-notice .notice-text p {
+  font-size: 11px;
+  color: #475569;
+  margin: 2px 0 0 0;
+  line-height: 1.4;
+}
+
+.cached-users-picker {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.picker-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #DC2626;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.cached-users-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cached-user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cached-user-chip:hover,
+.cached-user-chip.selected {
+  background: #FEF2F2;
+  border-color: #DC2626;
+  color: #DC2626;
+}
+
+.input-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.field-icon {
+  position: absolute;
+  left: 12px;
+  color: #94A3B8;
+  pointer-events: none;
+}
+
+.form-input.with-icon {
+  padding-left: 38px;
+  background: #FAFAFA;
+  border: 1.5px solid #E2E8F0;
+  color: #0F172A;
+}
+
+.form-input.with-icon:focus {
+  background: #FFFFFF;
+  border-color: #DC2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+.btn-auth-submit {
+  width: 100%;
+  height: 48px;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 800;
+  background: #DC2626;
+  color: #FFFFFF;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.3);
+}
+
+.btn-auth-submit:hover:not(:disabled) {
+  background: #B91C1C;
+}
+
+.offline-quick-actions {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-link-emergency {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #FEF2F2;
+  border: 1px dashed #FCA5A5;
+  color: #DC2626;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.btn-link-emergency:hover {
+  background: #FEE2E2;
+  border-color: #DC2626;
+}
+
+.btn-cancel-guest {
+  width: 100%;
+  margin-top: 8px;
+  height: 42px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748B;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+}
+
+.auth-footer-text {
+  margin-top: 20px;
+  text-align: center;
+  color: #64748B;
+  font-size: 13px;
+}
+
+.auth-link-highlight {
+  color: #DC2626;
+  cursor: pointer;
+  font-weight: 800;
 }
