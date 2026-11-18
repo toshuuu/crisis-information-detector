@@ -1,28 +1,49 @@
-import { Fragment, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, Loader2 } from 'lucide-react';
+import { MapPin, Loader2, WifiOff, DownloadCloud } from 'lucide-react';
+import OfflineMapManager from './OfflineMapManager';
 
 const STATUS_COLORS = {
-  active: '#EA4335',      // Google Red
-  verified: '#34A853',    // Google Green
-  uncertain: '#FBBC05',   // Google Yellow
-  false: '#9AA0A6',       // Google Grey
+  active: '#EA4335',      // Red
+  verified: '#34A853',    // Green
+  uncertain: '#FBBC05',   // Yellow
+  false: '#9AA0A6',       // Grey
+  pending: '#F59E0B',     // Amber for offline pending
 };
 
 // Custom SVG icon generator for Crisis Reports
-const createCustomIcon = (color) => {
+const createCustomIcon = (color, isSelected = false, isPending = false) => {
+  const size = isSelected ? 40 : 32;
+  const anchorX = size / 2;
+  const anchorY = size;
+  const filter = isSelected
+    ? `drop-shadow(0px 0px 8px ${color}) drop-shadow(0 4px 8px rgba(0,0,0,0.35))`
+    : 'drop-shadow(0 2px 4px rgba(0,0,0,0.25))';
+
+  const pulseRing = isSelected
+    ? `<span style="position: absolute; width: ${size + 14}px; height: ${size + 14}px; border-radius: 50%; border: 3px solid ${color}; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; top: -7px; left: -7px; pointer-events: none;"></span>`
+    : '';
+
+  const pendingBadge = isPending
+    ? `<span style="position: absolute; top: -4px; right: -4px; background: #DC2626; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #FFFFFF;"></span>`
+    : '';
+
   const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${color}" width="32px" height="32px">
-      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="white" stroke-width="1"/>
-    </svg>
+    <div style="position: relative; width: ${size}px; height: ${size}px; display: flex; align-items: center; justify-content: center;">
+      ${pulseRing}
+      ${pendingBadge}
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${color}" width="${size}px" height="${size}px" style="filter: ${filter}; transition: all 0.2s;">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="white" stroke-width="${isSelected ? 2 : 1}"/>
+      </svg>
+    </div>
   `;
   return L.divIcon({
     className: 'custom-leaflet-icon',
     html: svg,
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
+    iconSize: [size, size],
+    iconAnchor: [anchorX, anchorY],
   });
 };
 
@@ -42,56 +63,69 @@ const userLocationIcon = L.divIcon({
   popupAnchor: [0, -11],
 });
 
-// Selected Crisis Location Marker
+// Selected Crisis Location Marker (Pulsing Pinpoint Pin)
 const selectedLocationIcon = L.divIcon({
   className: 'selected-location-marker',
   html: `
-    <svg width="24" height="24" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" fill="transparent" stroke="#10B981" stroke-width="4" stroke-dasharray="4 4" />
-      <circle cx="12" cy="12" r="4" fill="#10B981" />
-    </svg>
+    <div style="position: relative; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+      <span style="position: absolute; width: 36px; height: 36px; border-radius: 50%; background-color: rgba(16, 185, 129, 0.4); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="#10B981" style="filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35));">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="white" stroke-width="1.5"/>
+      </svg>
+    </div>
   `,
-  iconSize: [24, 24],
-  iconAnchor: [12, 12],
+  iconSize: [36, 36],
+  iconAnchor: [18, 34],
 });
 
-// Component to center map on user location when coordinates become available or recenter is requested
-const MapController = ({ center, userLocation, shouldRecenter, onRecenterComplete }) => {
+// Controller to fly to user location or selected crisis
+const MapController = ({ center, userLocation, selectedReport, shouldRecenter, onRecenterComplete, onBoundsChange }) => {
   const map = useMap();
   const initialCenteredRef = useRef(false);
 
-  // Recenter explicitly when requested (e.g. Locate Me clicked)
   useEffect(() => {
     if (shouldRecenter && userLocation) {
-      map.flyTo([userLocation.lat, userLocation.lng], 16, {
-        duration: 1.5,
-      });
-      if (onRecenterComplete) {
-        onRecenterComplete();
-      }
+      map.flyTo([userLocation.lat, userLocation.lng], 15, { animate: true, duration: 1.2 });
+      if (onRecenterComplete) onRecenterComplete();
     }
   }, [shouldRecenter, userLocation, map, onRecenterComplete]);
 
-  // Initial setView: center once on user location (zoom 15) or fallback center (zoom 13)
   useEffect(() => {
-    if (!initialCenteredRef.current) {
-      if (userLocation) {
-        map.setView([userLocation.lat, userLocation.lng], 15);
-        initialCenteredRef.current = true;
-      } else if (center) {
-        map.setView([center.lat, center.lng], 13);
-        initialCenteredRef.current = true;
-      }
+    if (userLocation && !initialCenteredRef.current) {
+      map.setView([userLocation.lat, userLocation.lng], 14);
+      initialCenteredRef.current = true;
     }
-  }, [userLocation, center, map]);
+  }, [userLocation, map]);
+
+  useEffect(() => {
+    if (selectedReport && selectedReport.location?.coordinates) {
+      const [lng, lat] = selectedReport.location.coordinates;
+      map.flyTo([lat, lng], 15, { animate: true, duration: 1.0 });
+    }
+  }, [selectedReport, map]);
+
+  // Report center updates to parent for offline map downloading
+  useEffect(() => {
+    const handleMoveEnd = () => {
+      const c = map.getCenter();
+      if (onBoundsChange) {
+        onBoundsChange({ lat: c.lat, lng: c.lng });
+      }
+    };
+    map.on('moveend', handleMoveEnd);
+    return () => map.off('moveend', handleMoveEnd);
+  }, [map, onBoundsChange]);
 
   return null;
 };
 
+// Map click handler
 const MapClickHandler = ({ onMapClick }) => {
   useMapEvents({
-    click: (e) => {
-      onMapClick && onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
+    click(e) {
+      if (onMapClick) {
+        onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
+      }
     },
   });
   return null;
@@ -101,129 +135,174 @@ const MapComponent = ({
   center,
   reports,
   userLocation,
+  selectedReport,
   onMarkerClick,
   onMapClick,
   selectedCrisisLocation,
   shouldRecenter,
   onRecenterComplete,
-  onLocate,
-  isLocating,
-  showLocateButton = false,
+  isOffline = false,
 }) => {
-  const defaultCenter = [18.5204, 73.8567]; // Pune coords fallback
-  const mapCenter = userLocation
-    ? [userLocation.lat, userLocation.lng]
-    : center
-    ? [center.lat, center.lng]
-    : defaultCenter;
+  const [currentMapCenter, setCurrentMapCenter] = useState(center || { lat: 18.5204, lng: 73.8567 });
+  const [showMapManager, setShowMapManager] = useState(false);
+  const mapRef = useRef(null);
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div className="map-view-wrapper" style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {/* Offline Map Mode Indicator Pill */}
+      {isOffline && (
+        <div className="offline-map-badge" title="Map is operating in offline mode. Previously cached tiles are being served.">
+          <WifiOff size={13} />
+          <span>Offline Map Mode — Serving Cached Tiles</span>
+        </div>
+      )}
+
+      {/* Button to open Offline Map Manager */}
+      <button
+        type="button"
+        className="btn-offline-map-manager"
+        onClick={() => setShowMapManager(true)}
+        title="Offline Map Areas & Caching"
+        aria-label="Offline Map Manager"
+      >
+        <DownloadCloud size={16} />
+        <span>Offline Maps</span>
+      </button>
+
       <MapContainer
-        center={mapCenter}
-        zoom={userLocation ? 15 : 13}
-        style={{ width: '100%', height: '100%' }}
-        zoomControl={false}
+        center={[center.lat, center.lng]}
+        zoom={13}
+        style={{ height: '100%', width: '100%', background: '#F8FAFC' }}
+        ref={mapRef}
       >
         <MapController
           center={center}
           userLocation={userLocation}
+          selectedReport={selectedReport}
           shouldRecenter={shouldRecenter}
           onRecenterComplete={onRecenterComplete}
+          onBoundsChange={setCurrentMapCenter}
         />
         <MapClickHandler onMapClick={onMapClick} />
 
-        {/* OpenStreetMap Base Layer */}
+        {/* OpenStreetMap Base Layer - Intercepted & cached by Service Worker */}
         <TileLayer
           attribution='&copy; OpenStreetMap contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          maxZoom={18}
+          keepBuffer={4}
         />
 
-        {/* User Location */}
+        {/* User Location Marker & Accuracy Circle */}
         {userLocation && (
           <Fragment>
-            <Marker
-              position={[userLocation.lat, userLocation.lng]}
-              icon={userLocationIcon}
-            >
-              <Popup>You are here</Popup>
+            <Marker position={[userLocation.lat, userLocation.lng]} icon={userLocationIcon}>
+              <Popup>
+                <div style={{ textAlign: 'center', padding: '4px' }}>
+                  <strong>Your Current Location</strong>
+                  <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
+                    Accuracy: ±{Math.round(userLocation.accuracy || 0)}m
+                  </div>
+                </div>
+              </Popup>
             </Marker>
             {userLocation.accuracy && (
               <Circle
                 center={[userLocation.lat, userLocation.lng]}
-                radius={userLocation.accuracy}
+                radius={Math.min(userLocation.accuracy, 500)}
                 pathOptions={{
                   fillColor: '#3B82F6',
                   fillOpacity: 0.12,
                   color: '#3B82F6',
-                  opacity: 0.4,
-                  weight: 1.5,
+                  opacity: 0.35,
+                  weight: 1,
                 }}
               />
             )}
           </Fragment>
         )}
 
-        {/* Selected Crisis Location */}
+        {/* Selected Crisis Location Pinpoint (during report creation) */}
         {selectedCrisisLocation && (
           <Marker
             position={[selectedCrisisLocation.lat, selectedCrisisLocation.lng]}
             icon={selectedLocationIcon}
-          />
+          >
+            <Popup>
+              <div style={{ textAlign: 'center', padding: '4px' }}>
+                <strong style={{ color: '#10B981' }}>Selected Incident Location</strong>
+                <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
+                  {selectedCrisisLocation.lat.toFixed(4)}, {selectedCrisisLocation.lng.toFixed(4)}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
         )}
 
-        {/* Crisis Reports */}
+        {/* Crisis Reports Markers */}
         {reports.map((report) => {
-          const lat = report.location?.coordinates?.[1];
-          const lng = report.location?.coordinates?.[0];
-          if (lat == null || lng == null) return null;
-
-          const color = STATUS_COLORS[report.status] || '#FF3B3B';
+          if (!report.location?.coordinates) return null;
+          const [lng, lat] = report.location.coordinates;
+          const isSelected = selectedReport?._id === report._id || selectedReport?.clientReportId === report.clientReportId;
+          const isPending = report.syncStatus === 'pending' || report.syncStatus === 'syncing' || report.syncStatus === 'failed';
+          const markerColor = isPending ? STATUS_COLORS.pending : (STATUS_COLORS[report.status] || STATUS_COLORS.active);
 
           return (
-            <Fragment key={report._id}>
-              <Marker
-                position={[lat, lng]}
-                icon={createCustomIcon(color)}
-                eventHandlers={{
-                  click: () => onMarkerClick(report),
-                }}
-              />
-              {report.status === 'active' && (
-                <Circle
-                  center={[lat, lng]}
-                  radius={2000}
-                  pathOptions={{
-                    fillColor: '#FF3B3B',
-                    fillOpacity: 0.08,
-                    color: '#FF3B3B',
-                    opacity: 0.2,
-                    weight: 1,
-                  }}
-                />
-              )}
-            </Fragment>
+            <Marker
+              key={report._id || report.clientReportId}
+              position={[lat, lng]}
+              icon={createCustomIcon(markerColor, isSelected, isPending)}
+              eventHandlers={{
+                click: () => onMarkerClick(report),
+              }}
+            >
+              <Tooltip
+                direction="top"
+                offset={[0, -28]}
+                opacity={0.96}
+                className="crisis-leaflet-tooltip"
+              >
+                <div className="crisis-tooltip-content">
+                  <div className="crisis-tooltip-badge-row">
+                    <span className="crisis-tooltip-type" style={{ backgroundColor: markerColor }}>
+                      {report.type}
+                    </span>
+                    <span className="crisis-tooltip-status">
+                      {isPending ? 'Pending Sync' : report.status}
+                    </span>
+                  </div>
+                  <div className="crisis-tooltip-title">{report.description}</div>
+                  <div className="crisis-tooltip-meta">
+                    <span>
+                      {isPending
+                        ? 'Saved Offline'
+                        : `${(report.confirmations || 0) + (report.rejections || 0)} votes`}
+                    </span>
+                    <span className="crisis-tooltip-cta">Tap to view</span>
+                  </div>
+                </div>
+              </Tooltip>
+            </Marker>
           );
         })}
       </MapContainer>
 
-      {/* Optional In-Map Locate Button */}
-      {showLocateButton && onLocate && (
-        <button
-          type="button"
-          className="btn btn-secondary btn-locate btn-map-standalone"
-          onClick={onLocate}
-          disabled={isLocating}
-          title="Locate Me"
-          aria-label="Locate Me"
-        >
-          {isLocating ? <Loader2 size={18} className="spin-icon" /> : <MapPin size={18} />}
-          <span>{isLocating ? "Locating..." : "Locate Me"}</span>
-        </button>
+      {/* Offline Map Manager Modal */}
+      {showMapManager && (
+        <OfflineMapManager
+          isOpen={showMapManager}
+          onClose={() => setShowMapManager(false)}
+          currentCenter={currentMapCenter}
+          onSelectRegion={(coords) => {
+            if (mapRef.current) {
+              mapRef.current.flyTo([coords.lat, coords.lng], 14);
+            }
+            setShowMapManager(false);
+          }}
+        />
       )}
     </div>
   );
 };
 
 export default MapComponent;
-

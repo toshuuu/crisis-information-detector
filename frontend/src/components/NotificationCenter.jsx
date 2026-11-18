@@ -11,7 +11,8 @@ import {
   Info,
   Clock,
   Flame,
-  Droplets
+  Droplets,
+  WifiOff
 } from 'lucide-react';
 
 // Format timestamp into human-readable relative time
@@ -120,6 +121,16 @@ const NotificationCenter = ({
             </button>
           </div>
         </div>
+
+        {/* Offline Warning Notice */}
+        {isOffline && (
+          <div className="notif-offline-warning-bar">
+            <WifiOff size={14} color="#DC2626" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              You are offline. New server-originated crisis alerts cannot arrive without connectivity. Displaying locally preserved notifications.
+            </span>
+          </div>
+        )}
 
         {/* Tab Filters */}
         <div className="notif-tabs">

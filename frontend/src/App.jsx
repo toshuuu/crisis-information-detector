@@ -1,29 +1,69 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-import { MapPin, AlertTriangle, ShieldCheck, Trophy, Bell, LogOut, Loader2 } from 'lucide-react';
+import {
+  MapPin,
+  AlertTriangle,
+  ShieldCheck,
+  Trophy,
+  Bell,
+  LogOut,
+  Loader2,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  HeartPulse,
+  Download,
+  CheckCircle2,
+  Info
+} from 'lucide-react';
 import MapComponent from './components/Map';
 import ReportList from './components/ReportList';
 import ReportForm from './components/ReportForm';
 import Leaderboard from './components/Leaderboard';
 import VerificationPanel from './components/VerificationPanel';
 import NotificationCenter from './components/NotificationCenter';
+import EmergencyResourcesModal from './components/EmergencyResourcesModal';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import api from './services/api';
-import { syncOfflineReports } from './services/offlineSync';
+import {
+  getCachedReportsFromDB,
+  saveReportsToDB,
+  getPendingReportsFromDB,
+  deleteCachedReportFromDB,
+  clearUserNotificationsFromDB
+} from './services/db';
+import {
+  initConnectivitySync,
+  syncOfflineData,
+  subscribeSyncStatus
+} from './services/offlineSync';
 import {
   fetchUserNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   dismissNotification,
   dismissAllNotifications,
-  syncOfflineNotificationActions
+  createLocalNotification
 } from './services/notificationService';
 
 const rawApiUrl = import.meta.env.VITE_API_URL || 'https://crisis-misinformation-detector.onrender.com/api';
 const API_BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl.replace(/\/$/, '')}/api`;
 const socket = io(import.meta.env.VITE_SOCKET_URL || 'https://crisis-misinformation-detector.onrender.com');
+
+// Helper to format last sync timestamp
+const formatLastSync = (timestamp) => {
+  if (!timestamp) return 'Never';
+  const diffSec = Math.floor((Date.now() - timestamp) / 1000);
+  if (diffSec < 15) return 'Just now';
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
 
 function App() {
   const [isLoginView, setIsLoginView] = useState(true);
@@ -36,6 +76,7 @@ function App() {
   const [selectedReport, setSelectedReport] = useState(null);
   const [showReportForm, setShowReportForm] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [crisisLocation, setCrisisLocation] = useState(null);
 
   // Notifications State
@@ -44,9 +85,102 @@ function App() {
   const [persistentNotifications, setPersistentNotifications] = useState([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const [notifsLoading, setNotifsLoading] = useState(false);
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
-  // Initialize User
+  // Connectivity & Synchronization State
+  const [syncState, setSyncState] = useState({
+    status: navigator.onLine ? 'online' : 'offline',
+    isOnline: navigator.onLine,
+    isSyncing: false,
+    pendingCount: 0,
+    lastSyncTime: null,
+    error: null,
+  });
+
+  // PWA Installation prompt
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [isAppInstalled, setIsAppInstalled] = useState(false);
+
+  // Listen for PWA beforeinstallprompt event
+  useEffect(() => {
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      console.log('[PWA] beforeinstallprompt event captured');
+    };
+
+    const handleAppInstalled = () => {
+      setIsAppInstalled(true);
+      setInstallPrompt(null);
+      console.log('[PWA] App successfully installed!');
+      setToasts((prev) => [{ id: Date.now(), message: 'Crisis Information Detector installed successfully!' }, ...prev]);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    console.log(`[PWA] Install choice: ${outcome}`);
+    setInstallPrompt(null);
+  };
+
+  // Subscribe to offline sync and connectivity monitor
+  useEffect(() => {
+    const unsubscribe = subscribeSyncStatus((state) => {
+      setSyncState(state);
+    });
+
+    const cleanupConnectivity = initConnectivitySync();
+
+    return () => {
+      unsubscribe();
+      cleanupConnectivity();
+    };
+  }, []);
+
+  // Listen for sync events
+  useEffect(() => {
+    const handleSyncComplete = (e) => {
+      const { reportResults } = e.detail || {};
+      if (reportResults?.syncedCount > 0) {
+        setToasts((prev) => [
+          { id: Date.now(), message: `Synced ${reportResults.syncedCount} offline incident report(s)!` },
+          ...prev
+        ]);
+        setTimeout(() => setToasts((prev) => prev.slice(0, -1)), 5000);
+      }
+      fetchReports();
+      if (user?._id) {
+        loadNotifications(user._id);
+      }
+    };
+
+    const handleAuthExpired = () => {
+      setToasts((prev) => [
+        { id: Date.now(), message: 'Session expired. Please log in again to sync pending reports.' },
+        ...prev
+      ]);
+      setTimeout(() => setToasts((prev) => prev.slice(0, -1)), 6000);
+    };
+
+    window.addEventListener('offline_sync_completed', handleSyncComplete);
+    window.addEventListener('offline_sync_auth_expired', handleAuthExpired);
+
+    return () => {
+      window.removeEventListener('offline_sync_completed', handleSyncComplete);
+      window.removeEventListener('offline_sync_auth_expired', handleAuthExpired);
+    };
+  }, [user?._id]);
+
+  // Initialize User session
   useEffect(() => {
     const initUser = async () => {
       const token = localStorage.getItem('token');
@@ -55,15 +189,17 @@ function App() {
           const res = await api.get('/auth/me');
           setUser(res.data);
         } catch (err) {
-          console.error("Auth check failed", err);
-          localStorage.removeItem('token');
+          console.error('Auth check failed:', err);
+          if (err.response?.status === 401) {
+            localStorage.removeItem('token');
+          }
         }
       }
     };
     initUser();
   }, []);
 
-  // Fetch persistent notifications for the user
+  // Fetch persistent notifications with IndexedDB fallback
   const loadNotifications = useCallback(async (userId) => {
     if (!userId) return;
     setNotifsLoading(true);
@@ -78,7 +214,7 @@ function App() {
     }
   }, []);
 
-  // When user is initialized or changes, load their notifications and join their private socket room
+  // When user is initialized or changes, load notifications & join private socket room
   useEffect(() => {
     if (user?._id) {
       loadNotifications(user._id);
@@ -99,8 +235,8 @@ function App() {
 
   // Handler to locate user via browser geolocation API
   const handleLocateUser = useCallback(() => {
-    if (!("geolocation" in navigator)) {
-      const errMsg = "Geolocation is not supported by your browser.";
+    if (!('geolocation' in navigator)) {
+      const errMsg = 'Geolocation is not supported by your browser.';
       setLocationError(errMsg);
       setToasts((prev) => [{ id: Date.now(), message: errMsg }, ...prev]);
       return;
@@ -131,13 +267,13 @@ function App() {
       },
       (err) => {
         setIsLocating(false);
-        let errMsg = "Unable to retrieve your current location.";
+        let errMsg = 'Unable to retrieve your current location.';
         if (err.code === 1) {
-          errMsg = "Location permission denied. Please allow location access in your browser settings and try again.";
+          errMsg = 'Location permission denied. Please allow location access in your browser settings.';
         } else if (err.code === 2) {
-          errMsg = "Location information is unavailable. Please check your network or device GPS connection.";
+          errMsg = 'Location information is unavailable. Check device GPS.';
         } else if (err.code === 3) {
-          errMsg = "Location request timed out. Please click 'Locate Me' again.";
+          errMsg = 'Location request timed out. Please click "Locate Me" again.';
         }
         setLocationError(errMsg);
         setToasts((prev) => [{ id: Date.now(), message: errMsg }, ...prev]);
@@ -152,7 +288,7 @@ function App() {
 
   // Keep location updated in background once location is granted
   useEffect(() => {
-    if ("geolocation" in navigator && location) {
+    if ('geolocation' in navigator && location) {
       const watchId = navigator.geolocation.watchPosition(
         (pos) => {
           setLocation((prev) => ({
@@ -165,20 +301,51 @@ function App() {
             socket.emit('join_location', { lat: pos.coords.latitude, lng: pos.coords.longitude, userId: user._id });
           }
         },
-        (err) => console.warn("Geolocation watch warning:", err),
+        (err) => console.warn('Geolocation watch warning:', err),
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
       );
       return () => navigator.geolocation.clearWatch(watchId);
     }
   }, [user, !!location]);
 
-  // Fetch Reports
+  // Fetch Reports (Offline-First: loads IndexedDB first, merges pending reports, then attempts online fetch)
   const fetchReports = useCallback(async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/reports`);
-      setReports(res.data);
+      // 1. Instantly load cached reports from IndexedDB
+      const cached = await getCachedReportsFromDB();
+      // 2. Load pending offline reports
+      const pending = await getPendingReportsFromDB();
+
+      // Merge: pending items first with _isPendingSync tag, then cached
+      const pendingMap = new Set(pending.map((p) => p.serverReportId || p.clientReportId));
+      const initialMerged = [
+        ...pending.map((p) => ({ ...p, _isPendingSync: true })),
+        ...cached.filter((c) => !pendingMap.has(c._id) && !pendingMap.has(c.clientReportId)),
+      ];
+      setReports(initialMerged);
+
+      // 3. If online, fetch fresh reports from backend
+      if (navigator.onLine) {
+        try {
+          const res = await axios.get(`${API_BASE_URL}/reports`, { timeout: 6000 });
+          // Save server list into IndexedDB
+          await saveReportsToDB(res.data);
+
+          // Re-fetch pending to ensure no collision
+          const freshPending = await getPendingReportsFromDB();
+          const freshPendingMap = new Set(freshPending.map((p) => p.serverReportId || p.clientReportId));
+
+          const merged = [
+            ...freshPending.map((p) => ({ ...p, _isPendingSync: true })),
+            ...res.data.filter((c) => !freshPendingMap.has(c._id) && !freshPendingMap.has(c.clientReportId)),
+          ];
+          setReports(merged);
+        } catch (netErr) {
+          console.warn('[Reports] Online fetch failed, relying on IndexedDB cache:', netErr.message);
+        }
+      }
     } catch (err) {
-      console.error("Failed to fetch reports:", err);
+      console.error('Failed to load reports from database:', err);
     }
   }, []);
 
@@ -186,62 +353,31 @@ function App() {
     fetchReports();
   }, [fetchReports]);
 
-  // Sync offline reports and notification actions when internet comes back
-  useEffect(() => {
-    const handleOnline = async () => {
-      console.log("Internet connection restored.");
-      setIsOffline(false);
-
-      await syncOfflineReports();
-      await syncOfflineNotificationActions();
-
-      fetchReports();
-      if (user?._id) {
-        loadNotifications(user._id);
-      }
-    };
-
-    const handleOffline = () => {
-      console.log("Internet connection lost.");
-      setIsOffline(true);
-    };
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, [fetchReports, user?._id, loadNotifications]);
-
   const handleDeleteReport = async (reportId) => {
     try {
       await api.delete(`/reports/${reportId}`);
+      await deleteCachedReportFromDB(reportId);
       setReports((prev) => prev.filter((r) => r._id !== reportId));
       if (selectedReport?._id === reportId) {
         setSelectedReport(null);
       }
     } catch (err) {
-      console.error("Failed to delete report:", err);
+      console.error('Failed to delete report:', err);
     }
   };
 
-  // Socket Listeners (Real-time events)
+  // Real-time Socket.IO Listeners
   useEffect(() => {
-    // 1. New crisis report broadcast
     socket.on('new_report', (report) => {
       setReports((prev) => [report, ...prev]);
+      saveReportsToDB([report]); // Cache immediately in IndexedDB
       setToasts((prev) => [
         { id: Date.now(), message: `Active Alert: New ${report.type} report nearby!` },
         ...prev
       ]);
-      setTimeout(() => {
-        setToasts((prev) => prev.slice(0, -1));
-      }, 5000);
+      setTimeout(() => setToasts((prev) => prev.slice(0, -1)), 5000);
     });
 
-    // 2. Personal persistent notification event
     socket.on('notification', (notif) => {
       setPersistentNotifications((prev) => [
         notif,
@@ -254,9 +390,7 @@ function App() {
         { id: Date.now(), message: `${notif.title}: ${notif.message}` },
         ...prev
       ]);
-      setTimeout(() => {
-        setToasts((prev) => prev.slice(0, -1));
-      }, 5000);
+      setTimeout(() => setToasts((prev) => prev.slice(0, -1)), 5000);
     });
 
     socket.on('status_change', ({ reportId, status }) => {
@@ -269,6 +403,7 @@ function App() {
 
     socket.on('delete_report', (reportId) => {
       setReports((prev) => prev.filter((r) => r._id !== reportId));
+      deleteCachedReportFromDB(reportId);
       setSelectedReport((prev) => (prev?._id === reportId ? null : prev));
     });
 
@@ -324,13 +459,31 @@ function App() {
 
   const handleSelectReportFromNotif = (reportRef) => {
     const reportId = typeof reportRef === 'object' ? reportRef._id : reportRef;
-    const target = reports.find((r) => r._id === reportId);
+    const target = reports.find((r) => r._id === reportId || r.clientReportId === reportId);
     if (target) {
       handleReportClick(target);
     }
   };
 
+  const handleManualSync = async () => {
+    await syncOfflineData(true);
+    fetchReports();
+    if (user?._id) {
+      loadNotifications(user._id);
+    }
+  };
+
+  const handleLogout = async () => {
+    if (user?._id) {
+      // Clear user private cached notifications for multi-user security
+      await clearUserNotificationsFromDB(user._id);
+    }
+    localStorage.removeItem('token');
+    setUser(null);
+  };
+
   const trustDisplay = user ? `${(user.trustScore * 100).toFixed(0)}%` : '—';
+  const isOffline = !syncState.isOnline || syncState.status === 'offline';
 
   if (!user) {
     return isLoginView ? (
@@ -342,10 +495,100 @@ function App() {
 
   return (
     <div className="app-layout">
-      {/* Alert Banner */}
-      <div className="alert-banner">
-        <AlertTriangle size={14} className="alert-banner-icon" />
-        <span className="alert-banner-text">ACTIVE EMERGENCY GROUND TRUTH SYSTEM — LIVE VALIDATION ONLY</span>
+      {/* Alert Banner / Dynamic Connectivity Banner */}
+      <div className={`alert-banner ${isOffline ? 'offline-banner' : syncState.status === 'synchronizing' ? 'syncing-banner' : ''}`}>
+        {isOffline ? (
+          <>
+            <WifiOff size={14} className="alert-banner-icon offline" />
+            <span className="alert-banner-text">
+              OFFLINE ARCHIVE — DISPLAYING CACHED INCIDENTS (LAST SYNC: {formatLastSync(syncState.lastSyncTime)})
+            </span>
+          </>
+        ) : syncState.status === 'synchronizing' ? (
+          <>
+            <Loader2 size={14} className="alert-banner-icon spin-icon" />
+            <span className="alert-banner-text">
+              SYNCHRONIZING WITH EMERGENCY NETWORK...
+            </span>
+          </>
+        ) : syncState.status === 'sync_failed' ? (
+          <>
+            <AlertTriangle size={14} className="alert-banner-icon" />
+            <span className="alert-banner-text">
+              SYNC FAILED — {syncState.pendingCount} ITEM(S) PENDING — CLICK 'SYNC NOW' TO RETRY
+            </span>
+          </>
+        ) : (
+          <>
+            <AlertTriangle size={14} className="alert-banner-icon" />
+            <span className="alert-banner-text">
+              ACTIVE EMERGENCY GROUND TRUTH SYSTEM — LIVE VALIDATION ONLY
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* Global Connectivity & Synchronization Status Section */}
+      <div className="sync-status-strip">
+        <div className="status-strip-left">
+          <div className={`connection-pill ${syncState.status}`}>
+            <span className="connection-dot" />
+            <span className="connection-label">
+              {syncState.status === 'synchronizing'
+                ? 'Syncing...'
+                : syncState.status === 'sync_failed'
+                ? 'Sync Failed'
+                : isOffline
+                ? 'Offline'
+                : 'Online'}
+            </span>
+          </div>
+
+          <span className="sync-timestamp">
+            Last Synced: {formatLastSync(syncState.lastSyncTime)}
+          </span>
+
+          {syncState.pendingCount > 0 && (
+            <span className="pending-badge-counter" title={`${syncState.pendingCount} reports waiting to sync`}>
+              {syncState.pendingCount} Pending
+            </span>
+          )}
+        </div>
+
+        <div className="status-strip-right">
+          <button
+            type="button"
+            className="btn-sync-action"
+            onClick={handleManualSync}
+            disabled={syncState.isSyncing}
+            title="Verify server connection and sync pending data"
+          >
+            <RefreshCw size={13} className={syncState.isSyncing ? 'spin-icon' : ''} />
+            <span>{syncState.isSyncing ? 'Syncing...' : 'Sync Now'}</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn-emergency-action"
+            onClick={() => setShowEmergencyModal(true)}
+            title="Offline Emergency Helplines, First-Aid & Shelters"
+          >
+            <HeartPulse size={13} color="#FFFFFF" />
+            <span>Emergency Info</span>
+          </button>
+
+          {installPrompt && (
+            <button
+              type="button"
+              className="btn-install-pwa"
+              onClick={handleInstallClick}
+              title="Install app to home screen for offline access"
+            >
+              <Download size={13} />
+              <span>Install App</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Header */}
@@ -356,7 +599,7 @@ function App() {
           </div>
           <div className="brand-text">
             <h1>Crisis <span>Ground Truth</span></h1>
-            <p>Validator System</p>
+            <p>Validator System {isOffline ? '(Offline)' : ''}</p>
           </div>
         </div>
 
@@ -368,10 +611,7 @@ function App() {
 
           <button
             className="icon-btn"
-            onClick={() => {
-              localStorage.removeItem('token');
-              setUser(null);
-            }}
+            onClick={handleLogout}
             title="Logout"
             style={{ color: 'var(--primary)' }}
           >
@@ -426,11 +666,13 @@ function App() {
             center={location || { lat: 18.5204, lng: 73.8567 }}
             reports={reports}
             userLocation={location}
+            selectedReport={selectedReport}
             onMarkerClick={handleReportClick}
             onMapClick={(loc) => showReportForm && setCrisisLocation(loc)}
             selectedCrisisLocation={crisisLocation}
             shouldRecenter={shouldRecenter}
             onRecenterComplete={() => setShouldRecenter(false)}
+            isOffline={isOffline}
           />
           <div className="map-overlay-buttons">
             <button
@@ -442,7 +684,7 @@ function App() {
               aria-label="Locate Me"
             >
               {isLocating ? <Loader2 size={18} className="spin-icon" /> : <MapPin size={18} />}
-              <span>{isLocating ? "Locating..." : "Locate Me"}</span>
+              <span>{isLocating ? 'Locating...' : 'Locate Me'}</span>
             </button>
             <button
               className="btn btn-primary btn-report"
@@ -462,18 +704,24 @@ function App() {
           <div className="sidebar-header">
             <h2>
               <MapPin size={18} color="var(--primary)" />
-              Nearby Incidents
+              {isOffline ? 'Cached Incidents' : 'Nearby Incidents'}
+              {syncState.pendingCount > 0 && (
+                <span className="pending-sidebar-pill">
+                  {syncState.pendingCount} pending
+                </span>
+              )}
             </h2>
           </div>
           <div className="sidebar-body">
             <ReportList
               reports={reports}
               onReportClick={handleReportClick}
-              selectedId={selectedReport?._id}
+              selectedId={selectedReport?._id || selectedReport?.clientReportId}
               onDelete={handleDeleteReport}
             />
           </div>
-          {/* Verification Panel inside sidebar */}
+
+          {/* Verification Panel inside sidebar / mobile sheet */}
           {selectedReport && !showReportForm && (
             <VerificationPanel
               report={selectedReport}
@@ -481,6 +729,7 @@ function App() {
               userLocation={location}
               onClose={() => setSelectedReport(null)}
               onUpdate={fetchReports}
+              onDetectLocation={handleLocateUser}
             />
           )}
         </aside>
@@ -502,13 +751,27 @@ function App() {
                 handleLocateUser();
               }
             }}
-            onSuccess={fetchReports}
+            onSuccess={(newReport) => {
+              fetchReports();
+              if (newReport) {
+                setSelectedReport(newReport);
+              }
+            }}
           />
         )}
 
         {/* Leaderboard Modal */}
         {showLeaderboard && (
           <Leaderboard onClose={() => setShowLeaderboard(false)} />
+        )}
+
+        {/* Emergency Resources Modal */}
+        {showEmergencyModal && (
+          <EmergencyResourcesModal
+            isOpen={showEmergencyModal}
+            onClose={() => setShowEmergencyModal(false)}
+            userLocation={location}
+          />
         )}
 
         {/* Persistent Notification Center Dropdown / Panel */}
@@ -527,7 +790,7 @@ function App() {
         />
       </main>
 
-      {/* Floating Toast Notifications for Real-Time Feedback */}
+      {/* Floating Toast Notifications */}
       <div className="toast-container">
         {toasts.slice(0, 3).map((n) => (
           <div key={n.id} className="toast">

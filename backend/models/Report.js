@@ -21,7 +21,10 @@ const reportSchema = new mongoose.Schema({
   confirmations: { type: Number, default: 0 },
   rejections: { type: Number, default: 0 },
   imageUrl: { type: String },
-  radius: { type: Number, default: 10 } // km radius for verification
+  radius: { type: Number, default: 10 }, // km radius for verification
+  clientReportId: { type: String, sparse: true, index: true }, // Idempotency key for offline sync
+  isOfflineSubmission: { type: Boolean, default: false },
+  clientCreatedAt: { type: Date }
 }, { timestamps: true });
 
 reportSchema.index({ location: '2dsphere' });

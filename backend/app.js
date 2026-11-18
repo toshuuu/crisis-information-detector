@@ -13,7 +13,16 @@ app.use('/api/auth', authRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api', apiRoutes);
 
-// Basic health check
+// Health check endpoint for connectivity verification & offline sync
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    serverTime: new Date().toISOString(),
+    service: 'Crisis Ground Truth Validator API'
+  });
+});
+
+// Basic root health check
 app.get('/', (req, res) => res.send('Crisis Ground Truth Validator API is running'));
 
 module.exports = app;

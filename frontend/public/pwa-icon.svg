@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EF4444" />
+      <stop offset="100%" stop-color="#DC2626" />
+    </linearGradient>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#DC2626" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Background Base: Pure White -->
+  <rect width="512" height="512" rx="112" fill="#FFFFFF" />
+  <rect x="4" y="4" width="504" height="504" rx="108" fill="none" stroke="#FEE2E2" stroke-width="8" />
+
+  <!-- Subtle Emergency Radar Circles -->
+  <circle cx="256" cy="256" r="216" stroke="#FCA5A5" stroke-width="2" stroke-opacity="0.4" fill="none" />
+  <circle cx="256" cy="256" r="164" stroke="#EF4444" stroke-width="2" stroke-opacity="0.3" fill="none" stroke-dasharray="8 8" />
+
+  <!-- Emergency Shield Shape -->
+  <path d="M256 68 C342 68 412 98 412 180 C412 292 322 384 256 428 C190 384 100 292 100 180 C100 98 170 68 256 68 Z"
+        fill="url(#shieldGrad)"
+        filter="url(#softShadow)" />
+
+  <!-- Inner Shield Highlight -->
+  <path d="M256 90 C326 90 386 114 386 182 C386 276 312 354 256 394 C200 354 126 276 126 182 C126 114 186 90 256 90 Z"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="5"
+        stroke-opacity="0.3" />
+
+  <!-- White Emergency Beacon / Alert Symbol -->
+  <g transform="translate(256, 236) scale(1.15)">
+    <!-- Alert Triangle / Exclamation -->
+    <path d="M0 -75 L62 38 C67 47 61 58 50 58 L-50 58 C-61 58 -67 47 -62 38 Z" fill="#FFFFFF" />
+    <path d="M0 -30 L0 10" stroke="#DC2626" stroke-width="14" stroke-linecap="round" />
+    <circle cx="0" cy="34" r="7" fill="#DC2626" />
+  </g>
+
+  <!-- Ground-truth checkmark overlay on bottom -->
+  <circle cx="256" cy="370" r="34" fill="#FFFFFF" stroke="#DC2626" stroke-width="5" />
+  <path d="M244 370 L253 379 L269 362" fill="none" stroke="#DC2626" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

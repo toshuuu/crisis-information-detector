@@ -5,7 +5,26 @@ const socketHandler = require('../socket/socketHandler');
 
 exports.createReport = async (req, res) => {
   try {
-    const { userId, type, description, longitude, latitude, imageUrl } = req.body;
+    const { userId, type, description, longitude, latitude, imageUrl, clientReportId, isOfflineSubmission, clientCreatedAt } = req.body;
+
+    // Validate inputs
+    if (!type || !description || longitude === undefined || latitude === undefined) {
+      return res.status(400).json({ error: 'Missing required report fields (type, description, coordinates)' });
+    }
+
+    const latNum = parseFloat(latitude);
+    const lngNum = parseFloat(longitude);
+    if (isNaN(latNum) || isNaN(lngNum) || latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+      return res.status(400).json({ error: 'Invalid latitude or longitude coordinates' });
+    }
+
+    // Idempotency check: prevent duplicate submissions if offline sync retries
+    if (clientReportId) {
+      const existing = await Report.findOne({ clientReportId }).populate('reporter', 'name trustScore');
+      if (existing) {
+        return res.status(200).json(existing);
+      }
+    }
     
     const report = await Report.create({
       reporter: userId,
@@ -13,9 +32,12 @@ exports.createReport = async (req, res) => {
       description,
       location: {
         type: 'Point',
-        coordinates: [parseFloat(longitude), parseFloat(latitude)]
+        coordinates: [lngNum, latNum]
       },
-      imageUrl
+      imageUrl,
+      clientReportId,
+      isOfflineSubmission: Boolean(isOfflineSubmission),
+      clientCreatedAt: clientCreatedAt ? new Date(clientCreatedAt) : new Date()
     });
 
     // Notify all connected clients about the new report on the map
