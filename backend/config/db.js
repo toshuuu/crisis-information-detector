@@ -1,22 +1,24 @@
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
+    const uri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/crisis_detector';
+    mongoose.set('strictQuery', false);
+
     try {
-        const uri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/crisis_detector';
-        mongoose.set('strictQuery', false);
         await mongoose.connect(uri);
-        console.log('MongoDB Connected Successfully');
+        console.log(`MongoDB Connected Successfully: ${uri}`);
     } catch (error) {
-        console.error('MongoDB Connection Failed:', error.message);
+        console.warn('Direct MongoDB connection failed:', error.message);
         console.log('Attempting In-Memory MongoDB Fallback...');
+
         try {
             const { MongoMemoryServer } = require('mongodb-memory-server');
             const mongoServer = await MongoMemoryServer.create();
             const memoryUri = mongoServer.getUri();
             await mongoose.connect(memoryUri);
-            console.log('MongoDB Connected via In-Memory Fallback at', memoryUri);
+            console.log('MongoDB Connected via In-Memory Instance at:', memoryUri);
         } catch (memError) {
-            console.error('In-Memory MongoDB failed too:', memError.message);
+            console.error('All MongoDB connection options failed:', memError.message);
         }
     }
 };

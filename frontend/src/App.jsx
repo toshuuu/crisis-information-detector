@@ -7,19 +7,25 @@ import ReportList from './components/ReportList';
 import ReportForm from './components/ReportForm';
 import Leaderboard from './components/Leaderboard';
 import VerificationPanel from './components/VerificationPanel';
+import NotificationCenter from './components/NotificationCenter';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import api from './services/api';
 import { syncOfflineReports } from './services/offlineSync';
-
-
+import {
+  fetchUserNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  dismissNotification,
+  dismissAllNotifications,
+  syncOfflineNotificationActions
+} from './services/notificationService';
 
 const rawApiUrl = import.meta.env.VITE_API_URL || 'https://crisis-misinformation-detector.onrender.com/api';
 const API_BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl.replace(/\/$/, '')}/api`;
 const socket = io(import.meta.env.VITE_SOCKET_URL || 'https://crisis-misinformation-detector.onrender.com');
 
 function App() {
-
   const [isLoginView, setIsLoginView] = useState(true);
   const [user, setUser] = useState(null);
   const [location, setLocation] = useState(null);
@@ -30,9 +36,15 @@ function App() {
   const [selectedReport, setSelectedReport] = useState(null);
   const [showReportForm, setShowReportForm] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [notifications, setNotifications] = useState([]);
   const [crisisLocation, setCrisisLocation] = useState(null);
 
+  // Notifications State
+  const [toasts, setToasts] = useState([]);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+  const [persistentNotifications, setPersistentNotifications] = useState([]);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+  const [notifsLoading, setNotifsLoading] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   // Initialize User
   useEffect(() => {
@@ -51,12 +63,46 @@ function App() {
     initUser();
   }, []);
 
+  // Fetch persistent notifications for the user
+  const loadNotifications = useCallback(async (userId) => {
+    if (!userId) return;
+    setNotifsLoading(true);
+    try {
+      const data = await fetchUserNotifications(userId);
+      setPersistentNotifications(data.notifications || []);
+      setUnreadNotifCount(data.unreadCount || 0);
+    } catch (e) {
+      console.error('Failed to load notifications:', e);
+    } finally {
+      setNotifsLoading(false);
+    }
+  }, []);
+
+  // When user is initialized or changes, load their notifications and join their private socket room
+  useEffect(() => {
+    if (user?._id) {
+      loadNotifications(user._id);
+      socket.emit('join_user', user._id);
+      if (location) {
+        socket.emit('join_location', {
+          lat: location.lat,
+          lng: location.lng,
+          userId: user._id
+        });
+      }
+    } else {
+      setPersistentNotifications([]);
+      setUnreadNotifCount(0);
+      setShowNotificationCenter(false);
+    }
+  }, [user?._id, loadNotifications]);
+
   // Handler to locate user via browser geolocation API
   const handleLocateUser = useCallback(() => {
     if (!("geolocation" in navigator)) {
       const errMsg = "Geolocation is not supported by your browser.";
       setLocationError(errMsg);
-      setNotifications((prev) => [{ id: Date.now(), message: errMsg }, ...prev]);
+      setToasts((prev) => [{ id: Date.now(), message: errMsg }, ...prev]);
       return;
     }
 
@@ -86,15 +132,15 @@ function App() {
       (err) => {
         setIsLocating(false);
         let errMsg = "Unable to retrieve your current location.";
-        if (err.code === 1) { // PERMISSION_DENIED
-          errMsg = "Location permission denied. Please allow location access in your browser settings (look for the lock or site settings icon in your address bar) and try again.";
-        } else if (err.code === 2) { // POSITION_UNAVAILABLE
+        if (err.code === 1) {
+          errMsg = "Location permission denied. Please allow location access in your browser settings and try again.";
+        } else if (err.code === 2) {
           errMsg = "Location information is unavailable. Please check your network or device GPS connection.";
-        } else if (err.code === 3) { // TIMEOUT
+        } else if (err.code === 3) {
           errMsg = "Location request timed out. Please click 'Locate Me' again.";
         }
         setLocationError(errMsg);
-        setNotifications((prev) => [{ id: Date.now(), message: errMsg }, ...prev]);
+        setToasts((prev) => [{ id: Date.now(), message: errMsg }, ...prev]);
       },
       {
         enableHighAccuracy: true,
@@ -137,26 +183,37 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line
     fetchReports();
   }, [fetchReports]);
 
-  // Sync offline reports when internet comes back
+  // Sync offline reports and notification actions when internet comes back
   useEffect(() => {
     const handleOnline = async () => {
       console.log("Internet connection restored.");
+      setIsOffline(false);
 
       await syncOfflineReports();
+      await syncOfflineNotificationActions();
 
       fetchReports();
+      if (user?._id) {
+        loadNotifications(user._id);
+      }
+    };
+
+    const handleOffline = () => {
+      console.log("Internet connection lost.");
+      setIsOffline(true);
     };
 
     window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
 
     return () => {
       window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
     };
-  }, [fetchReports]);
+  }, [fetchReports, user?._id, loadNotifications]);
 
   const handleDeleteReport = async (reportId) => {
     try {
@@ -170,14 +227,35 @@ function App() {
     }
   };
 
-  // Socket Listeners
+  // Socket Listeners (Real-time events)
   useEffect(() => {
+    // 1. New crisis report broadcast
     socket.on('new_report', (report) => {
       setReports((prev) => [report, ...prev]);
-      setNotifications((prev) => [{ id: Date.now(), message: `New ${report.type} report nearby!` }, ...prev]);
-      // Auto-clear after 5s
+      setToasts((prev) => [
+        { id: Date.now(), message: `Active Alert: New ${report.type} report nearby!` },
+        ...prev
+      ]);
       setTimeout(() => {
-        setNotifications((prev) => prev.slice(0, -1));
+        setToasts((prev) => prev.slice(0, -1));
+      }, 5000);
+    });
+
+    // 2. Personal persistent notification event
+    socket.on('notification', (notif) => {
+      setPersistentNotifications((prev) => [
+        notif,
+        ...prev.filter((n) => n._id !== notif._id)
+      ]);
+      if (!notif.isRead) {
+        setUnreadNotifCount((prev) => prev + 1);
+      }
+      setToasts((prev) => [
+        { id: Date.now(), message: `${notif.title}: ${notif.message}` },
+        ...prev
+      ]);
+      setTimeout(() => {
+        setToasts((prev) => prev.slice(0, -1));
       }, 5000);
     });
 
@@ -196,6 +274,7 @@ function App() {
 
     return () => {
       socket.off('new_report');
+      socket.off('notification');
       socket.off('status_change');
       socket.off('verification_update');
       socket.off('delete_report');
@@ -205,6 +284,50 @@ function App() {
   const handleReportClick = (report) => {
     setSelectedReport(report);
     setShowReportForm(false);
+  };
+
+  // Notification interaction handlers
+  const handleMarkAsRead = async (id) => {
+    if (!user?._id) return;
+    setPersistentNotifications((prev) =>
+      prev.map((n) => (n._id === id ? { ...n, isRead: true } : n))
+    );
+    setUnreadNotifCount((prev) => Math.max(0, prev - 1));
+    await markNotificationAsRead(id, user._id);
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (!user?._id) return;
+    setPersistentNotifications((prev) =>
+      prev.map((n) => ({ ...n, isRead: true }))
+    );
+    setUnreadNotifCount(0);
+    await markAllNotificationsAsRead(user._id);
+  };
+
+  const handleDismissNotification = async (id) => {
+    if (!user?._id) return;
+    const item = persistentNotifications.find((n) => n._id === id);
+    if (item && !item.isRead) {
+      setUnreadNotifCount((prev) => Math.max(0, prev - 1));
+    }
+    setPersistentNotifications((prev) => prev.filter((n) => n._id !== id));
+    await dismissNotification(id, user._id);
+  };
+
+  const handleDismissAllNotifications = async () => {
+    if (!user?._id) return;
+    setPersistentNotifications([]);
+    setUnreadNotifCount(0);
+    await dismissAllNotifications(user._id);
+  };
+
+  const handleSelectReportFromNotif = (reportRef) => {
+    const reportId = typeof reportRef === 'object' ? reportRef._id : reportRef;
+    const target = reports.find((r) => r._id === reportId);
+    if (target) {
+      handleReportClick(target);
+    }
   };
 
   const trustDisplay = user ? `${(user.trustScore * 100).toFixed(0)}%` : '—';
@@ -221,8 +344,8 @@ function App() {
     <div className="app-layout">
       {/* Alert Banner */}
       <div className="alert-banner">
-        <AlertTriangle size={14} />
-        <span>ACTIVE EMERGENCY GROUND TRUTH SYSTEM — LIVE VALIDATION ONLY</span>
+        <AlertTriangle size={14} className="alert-banner-icon" />
+        <span className="alert-banner-text">ACTIVE EMERGENCY GROUND TRUTH SYSTEM — LIVE VALIDATION ONLY</span>
       </div>
 
       {/* Header */}
@@ -243,19 +366,41 @@ function App() {
             <div className="user-stats">{user?.points || 0} Points • Trust: {trustDisplay}</div>
           </div>
 
-          <button className="icon-btn" onClick={() => {
-            localStorage.removeItem('token');
-            setUser(null);
-          }} title="Logout" style={{ color: 'var(--primary)' }}>
+          <button
+            className="icon-btn"
+            onClick={() => {
+              localStorage.removeItem('token');
+              setUser(null);
+            }}
+            title="Logout"
+            style={{ color: 'var(--primary)' }}
+          >
             <LogOut size={20} />
           </button>
-          <button className="icon-btn" onClick={() => setShowLeaderboard(!showLeaderboard)}>
+
+          <button
+            className="icon-btn"
+            onClick={() => setShowLeaderboard(!showLeaderboard)}
+            title="Leaderboard"
+          >
             <Trophy size={20} />
           </button>
-          <div className="icon-btn" style={{ cursor: 'default' }}>
+
+          {/* Persistent Notification Bell Button */}
+          <button
+            type="button"
+            className="icon-btn notif-bell-btn"
+            onClick={() => setShowNotificationCenter(!showNotificationCenter)}
+            title={`Notifications (${unreadNotifCount} unread)`}
+            aria-label={`Notifications (${unreadNotifCount} unread)`}
+          >
             <Bell size={20} />
-            {notifications.length > 0 && <span className="notification-dot"></span>}
-          </div>
+            {unreadNotifCount > 0 && (
+              <span className="notification-badge">
+                {unreadNotifCount > 99 ? '99+' : unreadNotifCount}
+              </span>
+            )}
+          </button>
         </div>
       </header>
 
@@ -299,10 +444,13 @@ function App() {
               {isLocating ? <Loader2 size={18} className="spin-icon" /> : <MapPin size={18} />}
               <span>{isLocating ? "Locating..." : "Locate Me"}</span>
             </button>
-            <button className="btn btn-primary btn-report" onClick={() => {
-              setShowReportForm(true);
-              setCrisisLocation(location); // Default to current location
-            }}>
+            <button
+              className="btn btn-primary btn-report"
+              onClick={() => {
+                setShowReportForm(true);
+                setCrisisLocation(location);
+              }}
+            >
               <AlertTriangle size={22} />
               Report Crisis
             </button>
@@ -358,15 +506,30 @@ function App() {
           />
         )}
 
-        {/* Leaderboard */}
+        {/* Leaderboard Modal */}
         {showLeaderboard && (
           <Leaderboard onClose={() => setShowLeaderboard(false)} />
         )}
+
+        {/* Persistent Notification Center Dropdown / Panel */}
+        <NotificationCenter
+          notifications={persistentNotifications}
+          unreadCount={unreadNotifCount}
+          isOpen={showNotificationCenter}
+          onClose={() => setShowNotificationCenter(false)}
+          onMarkAsRead={handleMarkAsRead}
+          onMarkAllAsRead={handleMarkAllAsRead}
+          onDismiss={handleDismissNotification}
+          onDismissAll={handleDismissAllNotifications}
+          onSelectReport={handleSelectReportFromNotif}
+          loading={notifsLoading}
+          isOffline={isOffline}
+        />
       </main>
 
-      {/* Toast Notifications */}
+      {/* Floating Toast Notifications for Real-Time Feedback */}
       <div className="toast-container">
-        {notifications.slice(0, 3).map((n) => (
+        {toasts.slice(0, 3).map((n) => (
           <div key={n.id} className="toast">
             <Bell size={18} />
             <span>{n.message}</span>

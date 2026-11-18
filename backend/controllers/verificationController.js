@@ -1,6 +1,7 @@
 const Verification = require('../models/Verification');
 const Report = require('../models/Report');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const socketHandler = require('../socket/socketHandler');
 const { calcDistanceMeters, MAX_DISTANCE_METERS } = require('../utils/distance');
 
@@ -68,6 +69,38 @@ exports.verifyReport = async (req, res) => {
     user.points += 2; // +2 for participation
     user.lastActivity = Date.now();
 
+    // 1. Notify the verifier
+    try {
+      const verifierNotif = await Notification.create({
+        user: userId,
+        title: `Validation Submitted (+2 pts)`,
+        message: `You marked a ${report.type} report as "${status === 'yes' ? 'Confirmed' : 'Disputed'}".`,
+        category: 'verification',
+        report: report._id,
+        isRead: false
+      });
+      socketHandler.emitToUser(userId.toString(), 'notification', verifierNotif);
+    } catch (e) {
+      console.error('Failed to notify verifier:', e.message);
+    }
+
+    // 2. Notify the reporter about verification feedback
+    if (report.reporter && report.reporter.toString() !== userId.toString()) {
+      try {
+        const feedbackNotif = await Notification.create({
+          user: report.reporter,
+          title: `Report Verification Update`,
+          message: `A validator confirmed your ${report.type} incident report.`,
+          category: 'verification',
+          report: report._id,
+          isRead: false
+        });
+        socketHandler.emitToUser(report.reporter.toString(), 'notification', feedbackNotif);
+      } catch (e) {
+        console.error('Failed to notify reporter:', e.message);
+      }
+    }
+
     // Reward Logic if status changed to final state
     if (prevStatus !== report.status && (report.status === 'verified' || report.status === 'false')) {
       const reporter = await User.findById(report.reporter);
@@ -80,6 +113,23 @@ exports.verifyReport = async (req, res) => {
           reporter.trustScore = Math.max(0, reporter.trustScore - 0.2);
         }
         await reporter.save();
+
+        // Notify reporter of final outcome
+        try {
+          const outcomeNotif = await Notification.create({
+            user: report.reporter,
+            title: report.status === 'verified' ? `🎉 Report Verified (+20 pts)` : `⚠️ Report Disproven`,
+            message: report.status === 'verified'
+              ? `Your ${report.type} report has been officially verified by ground-truth consensus!`
+              : `Your ${report.type} report was determined to be false after community review.`,
+            category: report.status === 'verified' ? 'reward' : 'status_change',
+            report: report._id,
+            isRead: false
+          });
+          socketHandler.emitToUser(report.reporter.toString(), 'notification', outcomeNotif);
+        } catch (e) {
+          console.error('Failed to send status outcome notification to reporter:', e.message);
+        }
       }
 
       // Reward all verifiers who were correct
@@ -97,6 +147,22 @@ exports.verifyReport = async (req, res) => {
           }
           if (vUser.points > 100 && !vUser.badges.includes('Top Verifier')) vUser.badges.push('Top Verifier');
           await vUser.save();
+
+          if (isCorrect) {
+            try {
+              const rewardNotif = await Notification.create({
+                user: v.user,
+                title: `Consensus Reward (+10 pts)`,
+                message: `Your validation for the ${report.type} crisis matched the final verified outcome!`,
+                category: 'reward',
+                report: report._id,
+                isRead: false
+              });
+              socketHandler.emitToUser(v.user.toString(), 'notification', rewardNotif);
+            } catch (e) {
+              console.error('Failed to send reward notification:', e.message);
+            }
+          }
         }
       }
     } else {

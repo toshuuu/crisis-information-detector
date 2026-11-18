@@ -1,7 +1,13 @@
 # Environment Variables
 .env
 **/.env
+*.env.local
 
 # Node modules
 node_modules/
 **/node_modules/
+
+# Local database data
+.data/
+**/.data/
+
